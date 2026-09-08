@@ -13,6 +13,28 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// 將 log.Type 整數轉為中文類型名稱
+func getLogTypeName(logType int) string {
+	switch logType {
+	case 0:
+		return "登錄"
+	case 1:
+		return "充值"
+	case 2:
+		return "消耗"
+	case 3:
+		return "管理"
+	case 4:
+		return "系統"
+	case 5:
+		return "錯誤"
+	case 6:
+		return "退款"
+	default:
+		return "其他"
+	}
+}
+
 func GetAllLogs(c *gin.Context) {
 	pageInfo := common.GetPageQuery(c)
 	logType, _ := strconv.Atoi(c.Query("type"))
@@ -176,7 +198,8 @@ func ExportLogs(c *gin.Context) {
 	sheet1 := "Usage Logs"
 	f.SetSheetName("Sheet1", sheet1)
 
-	headers1 := []string{"時間", "用戶", "令牌", "模型", "提示 Token", "補全 Token", "花費額度", "Channel"}
+	// 新增「類型」欄位在表頭 B 欄
+	headers1 := []string{"時間", "類型", "用戶", "令牌", "模型", "提示 Token", "補全 Token", "花費額度", "Channel"}
 	for i, h := range headers1 {
 		cell, _ := excelize.CoordinatesToCellName(i+1, 1)
 		f.SetCellValue(sheet1, cell, h)
@@ -211,13 +234,14 @@ func ExportLogs(c *gin.Context) {
 	for idx, l := range logs {
 		row := idx + 2
 		f.SetCellValue(sheet1, fmt.Sprintf("A%d", row), time.Unix(l.CreatedAt, 0).Format("2006-01-02 15:04:05"))
-		f.SetCellValue(sheet1, fmt.Sprintf("B%d", row), l.Username)
-		f.SetCellValue(sheet1, fmt.Sprintf("C%d", row), l.TokenName)
-		f.SetCellValue(sheet1, fmt.Sprintf("D%d", row), l.ModelName)
-		f.SetCellValue(sheet1, fmt.Sprintf("E%d", row), l.PromptTokens)
-		f.SetCellValue(sheet1, fmt.Sprintf("F%d", row), l.CompletionTokens)
-		f.SetCellValue(sheet1, fmt.Sprintf("G%d", row), float64(l.Quota)/500000.0) // 換算金額
-		f.SetCellValue(sheet1, fmt.Sprintf("H%d", row), l.ChannelId)
+		f.SetCellValue(sheet1, fmt.Sprintf("B%d", row), getLogTypeName(l.Type)) // 寫入類型 (登錄/充值/消耗/管理/系統...)
+		f.SetCellValue(sheet1, fmt.Sprintf("C%d", row), l.Username)
+		f.SetCellValue(sheet1, fmt.Sprintf("D%d", row), l.TokenName)
+		f.SetCellValue(sheet1, fmt.Sprintf("E%d", row), l.ModelName)
+		f.SetCellValue(sheet1, fmt.Sprintf("F%d", row), l.PromptTokens)
+		f.SetCellValue(sheet1, fmt.Sprintf("G%d", row), l.CompletionTokens)
+		f.SetCellValue(sheet1, fmt.Sprintf("H%d", row), float64(l.Quota)/500000.0) // 換算金額
+		f.SetCellValue(sheet1, fmt.Sprintf("I%d", row), l.ChannelId)
 	}
 
 	// ---------------------------------------------------------
