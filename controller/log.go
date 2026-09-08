@@ -16,22 +16,22 @@ import (
 // 將 log.Type 整數轉為中文類型名稱
 func getLogTypeName(logType int) string {
 	switch logType {
-	case 0:
-		return "登錄"
 	case 1:
-		return "充值"
+		return "儲值" // LogTypeTopup
 	case 2:
-		return "消耗"
+		return "消耗" // LogTypeConsume
 	case 3:
-		return "管理"
+		return "管理" // LogTypeManage
 	case 4:
-		return "系統"
+		return "系統" // LogTypeSystem
 	case 5:
-		return "錯誤"
+		return "錯誤" // LogTypeError
 	case 6:
-		return "退款"
+		return "退款" // LogTypeRefund
+	case 7:
+		return "登入" // LogTypeLogin
 	default:
-		return "其他"
+		return "未知" // LogTypeUnknown (0) 或其他未知類型
 	}
 }
 
