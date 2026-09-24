@@ -19,6 +19,7 @@ import (
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/QuantumNous/new-api/setting/system_setting"
+	"github.com/xuri/excelize/v2"
 
 	"github.com/gin-gonic/gin"
 )
@@ -415,5 +416,223 @@ func UpdateOption(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "",
+	})
+}
+
+func ExportModelRatios(c *gin.Context) {
+	f := excelize.NewFile()
+	sheet := "Model Ratios"
+	_ = f.SetSheetName("Sheet1", sheet)
+
+	// 1. 寫入 9 大欄位 Header
+	headers := []string{
+		"Model Name",
+		"Model Price ($)",
+		"Model Ratio",
+		"Prompt Cache Ratio",
+		"Create Cache Ratio",
+		"Completion Ratio",
+		"Image Ratio",
+		"Audio Ratio",
+		"Audio Completion Ratio",
+	}
+	for i, h := range headers {
+		cell, _ := excelize.CoordinatesToCellName(i+1, 1)
+		_ = f.SetCellValue(sheet, cell, h)
+	}
+
+	// 2. 讀取系統所有模型定價資料 (包含新增的 4 個比率)
+	modelPriceMap := ratio_setting.GetModelPriceCopy()
+	modelRatioMap := ratio_setting.GetModelRatioCopy()
+	cacheRatioMap := ratio_setting.GetCacheRatioCopy()
+	createCacheRatioMap := ratio_setting.GetCreateCacheRatioCopy()
+	completionRatioMap := ratio_setting.GetCompletionRatioCopy()
+	imageRatioMap := ratio_setting.GetImageRatioCopy()
+	audioRatioMap := ratio_setting.GetAudioRatioCopy()
+	audioCompletionRatioMap := ratio_setting.GetAudioCompletionRatioCopy()
+
+	// 收集所有出現過的模型名稱 (Set)
+	modelNamesMap := make(map[string]struct{})
+	for k := range modelPriceMap {
+		modelNamesMap[k] = struct{}{}
+	}
+	for k := range modelRatioMap {
+		modelNamesMap[k] = struct{}{}
+	}
+	for k := range cacheRatioMap {
+		modelNamesMap[k] = struct{}{}
+	}
+	for k := range createCacheRatioMap {
+		modelNamesMap[k] = struct{}{}
+	}
+	for k := range completionRatioMap {
+		modelNamesMap[k] = struct{}{}
+	}
+	for k := range imageRatioMap {
+		modelNamesMap[k] = struct{}{}
+	}
+	for k := range audioRatioMap {
+		modelNamesMap[k] = struct{}{}
+	}
+	for k := range audioCompletionRatioMap {
+		modelNamesMap[k] = struct{}{}
+	}
+
+	// 將模型名稱排序，確保匯出的 Excel 內容井然有序
+	var sortedModelNames []string
+	for k := range modelNamesMap {
+		sortedModelNames = append(sortedModelNames, k)
+	}
+	sort.Strings(sortedModelNames)
+
+	// 寫入資料列
+	row := 2
+	for _, modelName := range sortedModelNames {
+		_ = f.SetCellValue(sheet, fmt.Sprintf("A%d", row), modelName)
+		_ = f.SetCellValue(sheet, fmt.Sprintf("B%d", row), modelPriceMap[modelName])
+		_ = f.SetCellValue(sheet, fmt.Sprintf("C%d", row), modelRatioMap[modelName])
+		_ = f.SetCellValue(sheet, fmt.Sprintf("D%d", row), cacheRatioMap[modelName])
+		_ = f.SetCellValue(sheet, fmt.Sprintf("E%d", row), createCacheRatioMap[modelName])
+		_ = f.SetCellValue(sheet, fmt.Sprintf("F%d", row), completionRatioMap[modelName])
+		_ = f.SetCellValue(sheet, fmt.Sprintf("G%d", row), imageRatioMap[modelName])
+		_ = f.SetCellValue(sheet, fmt.Sprintf("H%d", row), audioRatioMap[modelName])
+		_ = f.SetCellValue(sheet, fmt.Sprintf("I%d", row), audioCompletionRatioMap[modelName])
+		row++
+	}
+
+	// 3. 設定 Response Header 並匯出 .xlsx 串流
+	c.Header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+	c.Header("Content-Disposition", "attachment; filename=model_ratios_export.xlsx")
+	_ = f.Write(c.Writer)
+}
+
+func ImportModelRatios(c *gin.Context) {
+	file, err := c.FormFile("file")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "無效的檔案"})
+		return
+	}
+
+	src, err := file.Open()
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "無法讀取檔案"})
+		return
+	}
+	defer src.Close()
+
+	f, err := excelize.OpenReader(src)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "Excel 解析失敗"})
+		return
+	}
+
+	sheetName := f.GetSheetName(0)
+	rows, err := f.GetRows(sheetName)
+	if err != nil || len(rows) < 2 {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "Excel 內容無效或為空"})
+		return
+	}
+
+	// 🟢 1. 讀取 model/option.go 定義的 Option Struct，解析當前資料庫 JSON
+	parseOptionMap := func(key string) map[string]float64 {
+		m := make(map[string]float64)
+		var opt model.Option
+		if err := model.DB.Where("key = ?", key).First(&opt).Error; err == nil && opt.Value != "" {
+			_ = common.Unmarshal([]byte(opt.Value), &m)
+		}
+		return m
+	}
+
+	currentModelPrice := parseOptionMap("ModelPrice")
+	currentModelRatio := parseOptionMap("ModelRatio")
+	currentCacheRatio := parseOptionMap("CacheRatio")
+	currentCreateCacheRatio := parseOptionMap("CreateCacheRatio")
+	currentCompletionRatio := parseOptionMap("CompletionRatio")
+	currentImageRatio := parseOptionMap("ImageRatio")
+	currentAudioRatio := parseOptionMap("AudioRatio")
+	currentAudioCompletionRatio := parseOptionMap("AudioCompletionRatio")
+
+	// 解析 Excel 儲存格浮點數閉包
+	parseVal := func(row []string, idx int) (float64, bool) {
+		if len(row) > idx && strings.TrimSpace(row[idx]) != "" {
+			if v, e := strconv.ParseFloat(strings.TrimSpace(row[idx]), 64); e == nil && v >= 0 {
+				return v, true
+			}
+		}
+		return 0, false
+	}
+
+	for i, row := range rows {
+		if i == 0 || len(row) == 0 {
+			continue // 忽略表頭
+		}
+
+		modelName := strings.TrimSpace(row[0])
+		if modelName == "" {
+			continue
+		}
+
+		// 🟢 2. 關鍵修正：Model Price 只有在 > 0 時才寫入；若為 0 或未填則 delete，徹底消除前端 UI 的「矛盾」警告！
+		if v, ok := parseVal(row, 1); ok {
+			if v > 0 {
+				currentModelPrice[modelName] = v
+			} else {
+				delete(currentModelPrice, modelName)
+			}
+		}
+
+		if v, ok := parseVal(row, 2); ok {
+			currentModelRatio[modelName] = v
+		}
+		if v, ok := parseVal(row, 3); ok {
+			currentCacheRatio[modelName] = v
+		}
+		if v, ok := parseVal(row, 4); ok {
+			currentCreateCacheRatio[modelName] = v
+		}
+		if v, ok := parseVal(row, 5); ok {
+			currentCompletionRatio[modelName] = v
+		}
+		if v, ok := parseVal(row, 6); ok {
+			currentImageRatio[modelName] = v
+		}
+		if v, ok := parseVal(row, 7); ok {
+			currentAudioRatio[modelName] = v
+		}
+		if v, ok := parseVal(row, 8); ok {
+			currentAudioCompletionRatio[modelName] = v
+		}
+	}
+
+	// 🟢 3. 使用比照 model/option.go 的 UpdateOption / ratio_setting 方法進行同步
+	if jsonBytes, err := common.Marshal(currentModelPrice); err == nil {
+		_ = ratio_setting.UpdateModelPriceByJSONString(string(jsonBytes))
+		_ = model.UpdateOption("ModelPrice", string(jsonBytes))
+	}
+	if jsonBytes, err := common.Marshal(currentModelRatio); err == nil {
+		_ = ratio_setting.UpdateModelRatioByJSONString(string(jsonBytes))
+	}
+	if jsonBytes, err := common.Marshal(currentCacheRatio); err == nil {
+		_ = ratio_setting.UpdateCacheRatioByJSONString(string(jsonBytes))
+	}
+	if jsonBytes, err := common.Marshal(currentCreateCacheRatio); err == nil {
+		_ = ratio_setting.UpdateCreateCacheRatioByJSONString(string(jsonBytes))
+	}
+	if jsonBytes, err := common.Marshal(currentCompletionRatio); err == nil {
+		_ = ratio_setting.UpdateCompletionRatioByJSONString(string(jsonBytes))
+	}
+	if jsonBytes, err := common.Marshal(currentImageRatio); err == nil {
+		_ = ratio_setting.UpdateImageRatioByJSONString(string(jsonBytes))
+	}
+	if jsonBytes, err := common.Marshal(currentAudioRatio); err == nil {
+		_ = ratio_setting.UpdateAudioRatioByJSONString(string(jsonBytes))
+	}
+	if jsonBytes, err := common.Marshal(currentAudioCompletionRatio); err == nil {
+		_ = ratio_setting.UpdateAudioCompletionRatioByJSONString(string(jsonBytes))
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "模型價格與比率已成功批量更新！",
 	})
 }

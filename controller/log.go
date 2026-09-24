@@ -193,16 +193,27 @@ func ExportLogs(c *gin.Context) {
 	defer f.Close()
 
 	// ---------------------------------------------------------
-	// Sheet 1: Usage Logs (原始明細)
+	// Sheet 1: Usage Logs (標準 10 大英文表頭)
 	// ---------------------------------------------------------
 	sheet1 := "Usage Logs"
 	f.SetSheetName("Sheet1", sheet1)
 
-	// 新增「類型」欄位在表頭 B 欄
-	headers1 := []string{"時間", "類型", "用戶", "令牌", "模型", "提示 Token", "補全 Token", "花費額度", "Channel"}
+	// 表頭完全對齊前端列表：Time, Channel, User, Token, Model, Stream, Tokens, Cost, Timing, Details
+	headers1 := []string{
+		"Time",
+		"Channel",
+		"User",
+		"Token",
+		"Model",
+		"Stream",
+		"Tokens",
+		"Cost",
+		"Timing",
+		"Details",
+	}
 	for i, h := range headers1 {
 		cell, _ := excelize.CoordinatesToCellName(i+1, 1)
-		f.SetCellValue(sheet1, cell, h)
+		_ = f.SetCellValue(sheet1, cell, h)
 	}
 
 	// 查詢日誌明細數據
@@ -233,30 +244,55 @@ func ExportLogs(c *gin.Context) {
 
 	for idx, l := range logs {
 		row := idx + 2
-		f.SetCellValue(sheet1, fmt.Sprintf("A%d", row), time.Unix(l.CreatedAt, 0).Format("2006-01-02 15:04:05"))
-		f.SetCellValue(sheet1, fmt.Sprintf("B%d", row), getLogTypeName(l.Type)) // 寫入類型 (登錄/充值/消耗/管理/系統...)
-		f.SetCellValue(sheet1, fmt.Sprintf("C%d", row), l.Username)
-		f.SetCellValue(sheet1, fmt.Sprintf("D%d", row), l.TokenName)
-		f.SetCellValue(sheet1, fmt.Sprintf("E%d", row), l.ModelName)
-		f.SetCellValue(sheet1, fmt.Sprintf("F%d", row), l.PromptTokens)
-		f.SetCellValue(sheet1, fmt.Sprintf("G%d", row), l.CompletionTokens)
-		f.SetCellValue(sheet1, fmt.Sprintf("H%d", row), float64(l.Quota)/500000.0) // 換算金額
-		f.SetCellValue(sheet1, fmt.Sprintf("I%d", row), l.ChannelId)
+
+		// 是否為流式請求 (Stream)
+		isStream := "No"
+		if l.IsStream { // 若 Log struct 無此欄位可直接設為 "No" 或判斷 l.Type
+			isStream = "Yes"
+		}
+
+		// 總 Tokens 數 (Prompt + Completion)
+		totalTokens := l.PromptTokens + l.CompletionTokens
+
+		// 耗時 (ms)
+		timingStr := fmt.Sprintf("%dms", l.UseTime)
+
+		// 詳情 (若 Content 為空，寫入日誌類型名稱)
+		details := l.Content
+		if details == "" {
+			details = getLogTypeName(l.Type)
+		}
+
+		_ = f.SetCellValue(sheet1, fmt.Sprintf("A%d", row), time.Unix(l.CreatedAt, 0).Format("2006-01-02 15:04:05")) // Time
+		_ = f.SetCellValue(sheet1, fmt.Sprintf("B%d", row), l.ChannelId)                                             // Channel
+		_ = f.SetCellValue(sheet1, fmt.Sprintf("C%d", row), l.Username)                                              // User
+		_ = f.SetCellValue(sheet1, fmt.Sprintf("D%d", row), l.TokenName)                                             // Token
+		_ = f.SetCellValue(sheet1, fmt.Sprintf("E%d", row), l.ModelName)                                             // Model
+		_ = f.SetCellValue(sheet1, fmt.Sprintf("F%d", row), isStream)                                                // Stream
+		_ = f.SetCellValue(sheet1, fmt.Sprintf("G%d", row), totalTokens)                                             // Tokens
+		_ = f.SetCellValue(sheet1, fmt.Sprintf("H%d", row), float64(l.Quota)/500000.0)                               // Cost ($)
+		_ = f.SetCellValue(sheet1, fmt.Sprintf("I%d", row), timingStr)                                               // Timing
+		_ = f.SetCellValue(sheet1, fmt.Sprintf("J%d", row), details)                                                 // Details
 	}
 
 	// ---------------------------------------------------------
-	// Sheet 2: 用戶月度對帳 (彙整對帳與 MoM 成長率)
+	// Sheet 2: User Monthly Summary (用戶月度對帳全英文頁籤)
 	// ---------------------------------------------------------
-	sheet2 := "用戶月度對帳"
+	sheet2 := "User Monthly Summary"
 	f.NewSheet(sheet2)
 
-	headers2 := []string{"用戶名稱", "對帳月份", "當月總消耗金額 ($)", "上月總消耗金額 ($)", "MoM 環比成長率"}
+	headers2 := []string{
+		"User",
+		"Month",
+		"Current Month Cost ($)",
+		"Previous Month Cost ($)",
+		"MoM Growth Rate",
+	}
 	for i, h := range headers2 {
 		cell, _ := excelize.CoordinatesToCellName(i+1, 1)
-		f.SetCellValue(sheet2, cell, h)
+		_ = f.SetCellValue(sheet2, cell, h)
 	}
 
-	// 模擬/聚合月份消費數據 (可依據 LOG_DB 進行 GROUP BY 查詢)
 	type MonthlyRecon struct {
 		Username   string  `json:"username"`
 		Month      string  `json:"month"`
@@ -264,7 +300,6 @@ func ExportLogs(c *gin.Context) {
 	}
 
 	var reconList []MonthlyRecon
-	// 透過 SQL 統計用戶按月消費
 	model.LOG_DB.Raw(`
 		SELECT username, 
 		       strftime('%Y-%m', datetime(created_at, 'unixepoch')) as month, 
@@ -276,17 +311,19 @@ func ExportLogs(c *gin.Context) {
 
 	for idx, r := range reconList {
 		row := idx + 2
-		f.SetCellValue(sheet2, fmt.Sprintf("A%d", row), r.Username)
-		f.SetCellValue(sheet2, fmt.Sprintf("B%d", row), r.Month)
-		f.SetCellValue(sheet2, fmt.Sprintf("C%d", row), r.TotalQuota)
-		// 設定動態計算公式與 MoM 成長率 (若有前一月數據)
-		f.SetCellValue(sheet2, fmt.Sprintf("D%d", row), 0.00)
-		f.SetCellFormula(sheet2, fmt.Sprintf("E%d", row), fmt.Sprintf("IF(D%d=0, 0, (C%d-D%d)/D%d)", row, row, row, row))
+		_ = f.SetCellValue(sheet2, fmt.Sprintf("A%d", row), r.Username)
+		_ = f.SetCellValue(sheet2, fmt.Sprintf("B%d", row), r.Month)
+		_ = f.SetCellValue(sheet2, fmt.Sprintf("C%d", row), r.TotalQuota)
+		_ = f.SetCellValue(sheet2, fmt.Sprintf("D%d", row), 0.00)
+		_ = f.SetCellFormula(sheet2, fmt.Sprintf("E%d", row), fmt.Sprintf("IF(D%d=0, 0, (C%d-D%d)/D%d)", row, row, row, row))
 	}
 
-	// 3. 設定 HTTP Response Header 輸出檔案
-	c.Header("Content-Type", "application/octet-stream")
-	c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=usage_logs_%s.xlsx", time.Now().Format("2006-02-01")))
+	// 3. 設定 HTTP Response Header 並輸出帶時間戳記的 Excel 檔案
+	timestamp := time.Now().Format("20060102_1504")
+	filename := fmt.Sprintf("usage_logs_%s.xlsx", timestamp)
+
+	c.Header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+	c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=%s", filename))
 	c.Header("Pragma", "no-cache")
 	c.Header("Cache-Control", "no-cache")
 

@@ -308,7 +308,7 @@ export function CommonLogsFilterBar<TData>(
               className="flex items-center gap-1 h-8 text-xs"
             >
               <Download className="size-3.5" />
-              <span>{t("導出 Excel")}</span>
+              <span>{t("Export Excel")}</span>
             </Button>
           }
         >

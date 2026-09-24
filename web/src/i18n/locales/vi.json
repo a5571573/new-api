@@ -5537,6 +5537,9 @@
     "Zero retention": "Không lưu dữ liệu",
     "Zhipu": "Zhipu",
     "Zhipu V4": "Zhipu V4",
-    "Zoom": "Zoom"
+    "Zoom": "Zoom",
+    "Import Excel": "Nhập Excel",
+    "Export Excel": "Xuất Excel",
+    "Importing...": "Đang nhập..."
   }
 }
