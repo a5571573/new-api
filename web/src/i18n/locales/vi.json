@@ -6777,6 +6777,11 @@
     "Zhipu": "Zhipu",
     "Zhipu GLM": "Zhipu GLM",
     "Zhipu V4": "Zhipu V4",
-    "Zoom": "Zoom"
+    "Zoom": "Zoom",
+    "Import Excel": "Nhập Excel",
+    "Export Excel": "Xuất Excel",
+    "Batch import successful!": "Nhập hàng loạt thành công!",
+    "Import failed": "Nhập thất bại",
+    "Upload failed": "Tải lên thất bại"
   }
 }

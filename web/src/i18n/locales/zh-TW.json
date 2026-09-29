@@ -6777,6 +6777,11 @@
     "Zhipu": "智譜",
     "Zhipu GLM": "智譜GLM",
     "Zhipu V4": "智譜 V4",
-    "Zoom": "縮放"
+    "Zoom": "縮放",
+    "Import Excel": "匯入 Excel",
+    "Export Excel": "匯出 Excel",
+    "Batch import successful!": "批量匯入成功！",
+    "Import failed": "匯入失敗",
+    "Upload failed": "上傳失敗"
   }
 }

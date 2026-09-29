@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -8,6 +9,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/i18n"
@@ -22,6 +24,7 @@ import (
 	"github.com/QuantumNous/new-api/setting/system_setting"
 
 	"github.com/gin-gonic/gin"
+	"github.com/xuri/excelize/v2"
 )
 
 var completionRatioMetaOptionKeys = []string{
@@ -504,4 +507,156 @@ func UpdateOption(c *gin.Context) {
 		"success": true,
 		"message": "",
 	})
+}
+
+// ExportModelRatios 匯出完整模型計費配置成 Excel 檔案
+func ExportModelRatios(c *gin.Context) {
+	f := excelize.NewFile()
+	defer func() {
+		if err := f.Close(); err != nil {
+			common.SysError("failed to close excel file: " + err.Error())
+		}
+	}()
+
+	sheetName := "Sheet1"
+	headers := []string{
+		"Model Name", "Billing Mode", "Billing Expr",
+		"Fixed Price ($)", "Model Ratio", "Completion Ratio",
+	}
+
+	for i, h := range headers {
+		cell, _ := excelize.CoordinatesToCellName(i+1, 1)
+		f.SetCellValue(sheetName, cell, h)
+	}
+
+	// 1. 從 billing_setting 抓取表達式 Map (對齊官方 Copy 介面)
+	billingModeMap := billing_setting.GetBillingModeCopy()
+	billingExprMap := billing_setting.GetBillingExprCopy()
+
+	// 2. 從 model_setting 抓取傳統倍率 Map (對齊官方 Copy 介面)
+	modelPriceMap := ratio_setting.GetModelPriceCopy()
+	modelRatioMap := ratio_setting.GetModelRatioCopy()
+	completionRatioMap := ratio_setting.GetCompletionRatioCopy()
+
+	// 彙整所有模型名稱列表
+	modelSet := make(map[string]bool)
+	for k := range billingExprMap {
+		modelSet[k] = true
+	}
+	for k := range modelRatioMap {
+		modelSet[k] = true
+	}
+	for k := range modelPriceMap {
+		modelSet[k] = true
+	}
+
+	var modelList []string
+	for k := range modelSet {
+		modelList = append(modelList, k)
+	}
+	sort.Strings(modelList)
+
+	for rowIdx, modelName := range modelList {
+		row := rowIdx + 2
+		f.SetCellValue(sheetName, fmt.Sprintf("A%d", row), modelName)
+
+		mode := billingModeMap[modelName]
+		if mode == "" {
+			mode = "expr"
+		}
+		f.SetCellValue(sheetName, fmt.Sprintf("B%d", row), mode)
+		f.SetCellValue(sheetName, fmt.Sprintf("C%d", row), billingExprMap[modelName])
+		f.SetCellValue(sheetName, fmt.Sprintf("D%d", row), modelPriceMap[modelName])
+		f.SetCellValue(sheetName, fmt.Sprintf("E%d", row), modelRatioMap[modelName])
+		f.SetCellValue(sheetName, fmt.Sprintf("F%d", row), completionRatioMap[modelName])
+	}
+
+	c.Header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+	c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=model_pricing_%d.xlsx", time.Now().Unix()))
+	_ = f.Write(c.Writer)
+}
+
+// ImportModelRatios 批量匯入並更新模型計費
+func ImportModelRatios(c *gin.Context) {
+	file, _, err := c.Request.FormFile("file")
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{"success": false, "message": "無效的檔案上傳: " + err.Error()})
+		return
+	}
+	defer file.Close()
+
+	f, err := excelize.OpenReader(file)
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{"success": false, "message": "Excel 解析失敗: " + err.Error()})
+		return
+	}
+	defer f.Close()
+
+	rows, err := f.GetRows("Sheet1")
+	if err != nil || len(rows) <= 1 {
+		c.JSON(http.StatusOK, gin.H{"success": false, "message": "Excel 內容無效或為空"})
+		return
+	}
+
+	// 取得當前 Map 副本
+	billingModeMap := billing_setting.GetBillingModeCopy()
+	billingExprMap := billing_setting.GetBillingExprCopy()
+	modelPriceMap := ratio_setting.GetModelPriceCopy()
+	modelRatioMap := ratio_setting.GetModelRatioCopy()
+	completionRatioMap := ratio_setting.GetCompletionRatioCopy()
+
+	for i, row := range rows {
+		if i == 0 || len(row) == 0 {
+			continue
+		}
+		modelName := strings.TrimSpace(row[0])
+		if modelName == "" {
+			continue
+		}
+
+		// Col B: Billing Mode
+		if len(row) > 1 && row[1] != "" {
+			billingModeMap[modelName] = strings.TrimSpace(row[1])
+		}
+		// Col C: Billing Expr
+		if len(row) > 2 && row[2] != "" {
+			billingExprMap[modelName] = strings.TrimSpace(row[2])
+		}
+		// Col D: Model Price
+		if len(row) > 3 && row[3] != "" {
+			if val, err := strconv.ParseFloat(strings.TrimSpace(row[3]), 64); err == nil {
+				if val > 0 {
+					modelPriceMap[modelName] = val
+				} else {
+					delete(modelPriceMap, modelName)
+				}
+			}
+		}
+		// Col E: Model Ratio
+		if len(row) > 4 && row[4] != "" {
+			if val, err := strconv.ParseFloat(strings.TrimSpace(row[4]), 64); err == nil {
+				modelRatioMap[modelName] = val
+			}
+		}
+		// Col F: Completion Ratio
+		if len(row) > 5 && row[5] != "" {
+			if val, err := strconv.ParseFloat(strings.TrimSpace(row[5]), 64); err == nil {
+				completionRatioMap[modelName] = val
+			}
+		}
+	}
+
+	// 寫回 Option 資料庫
+	saveMapOption("billing_setting.billing_mode", billingModeMap)
+	saveMapOption("billing_setting.billing_expr", billingExprMap)
+	saveMapOption("ModelPrice", modelPriceMap)
+	saveMapOption("ModelRatio", modelRatioMap)
+	saveMapOption("CompletionRatio", completionRatioMap)
+
+	c.JSON(http.StatusOK, gin.H{"success": true, "message": "批量匯入成功！已同步更新表達式與倍率設定。"})
+}
+
+func saveMapOption(key string, data interface{}) {
+	bytes, _ := json.Marshal(data)
+	_ = model.UpdateOption(key, string(bytes))
 }
