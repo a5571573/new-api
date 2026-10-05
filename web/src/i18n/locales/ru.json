@@ -6866,8 +6866,16 @@
     "Zoom": "Zoom",
     "Import Excel": "Импорт Excel",
     "Export Excel": "Экспорт Excel",
-    "Batch import successful!": "Пакетный импорт выполнен успешно!",
     "Import failed": "Ошибка импорта",
-    "Upload failed": "Ошибка загрузки"
+    "Failed to export model pricing": "Не удалось экспортировать цены моделей",
+    "No pricing changes found in the file": "В файле нет изменений цен",
+    "Updated pricing for {{count}} models": "Обновлены цены для моделей: {{count}}",
+    "(default)": "(по умолчанию)",
+    "Importing...": "Импорт...",
+    "Exporting...": "Экспорт...",
+    "Confirm pricing import": "Подтвердите импорт цен",
+    "{{count}} models will be updated. Blank values use the system default.": "Будет обновлено моделей: {{count}}. Пустые значения используют системные значения по умолчанию.",
+    "Import": "Импортировать",
+    "Fix these rows and import again.": "Исправьте эти строки и импортируйте снова."
   }
 }

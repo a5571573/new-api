@@ -6866,8 +6866,16 @@
     "Zoom": "Zoom",
     "Import Excel": "Importer Excel",
     "Export Excel": "Exporter Excel",
-    "Batch import successful!": "Importation en lot réussie !",
     "Import failed": "Échec de l'importation",
-    "Upload failed": "Échec du téléchargement"
+    "Failed to export model pricing": "Échec de l'exportation des tarifs des modèles",
+    "No pricing changes found in the file": "Aucune modification de tarif dans le fichier",
+    "Updated pricing for {{count}} models": "Tarifs mis à jour pour {{count}} modèles",
+    "(default)": "(par défaut)",
+    "Importing...": "Import en cours...",
+    "Exporting...": "Exportation en cours...",
+    "Confirm pricing import": "Confirmer l'importation des tarifs",
+    "{{count}} models will be updated. Blank values use the system default.": "{{count}} modèles seront mis à jour. Les valeurs vides utilisent la valeur par défaut du système.",
+    "Import": "Importer",
+    "Fix these rows and import again.": "Corrigez ces lignes et importez à nouveau."
   }
 }

@@ -6866,8 +6866,16 @@
     "Zoom": "ズーム",
     "Import Excel": "Excelインポート",
     "Export Excel": "Excelエクスポート",
-    "Batch import successful!": "一括インポートに成功しました！",
     "Import failed": "インポートに失敗しました",
-    "Upload failed": "アップロードに失敗しました"
+    "Failed to export model pricing": "モデル価格のエクスポートに失敗しました",
+    "No pricing changes found in the file": "ファイルに価格の変更はありません",
+    "Updated pricing for {{count}} models": "{{count}} 件のモデル価格を更新しました",
+    "(default)": "（デフォルト）",
+    "Importing...": "インポート中...",
+    "Exporting...": "エクスポート中...",
+    "Confirm pricing import": "価格のインポートを確認",
+    "{{count}} models will be updated. Blank values use the system default.": "{{count}} 件のモデルが更新されます。空欄はシステムのデフォルトを使用します。",
+    "Import": "インポート",
+    "Fix these rows and import again.": "以下の行を修正して再度インポートしてください。"
   }
 }

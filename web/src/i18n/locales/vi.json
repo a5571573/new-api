@@ -6866,8 +6866,16 @@
     "Zoom": "Zoom",
     "Import Excel": "Nhập Excel",
     "Export Excel": "Xuất Excel",
-    "Batch import successful!": "Nhập hàng loạt thành công!",
     "Import failed": "Nhập thất bại",
-    "Upload failed": "Tải lên thất bại"
+    "Failed to export model pricing": "Xuất giá mô hình thất bại",
+    "No pricing changes found in the file": "Không có thay đổi giá nào trong tệp",
+    "Updated pricing for {{count}} models": "Đã cập nhật giá cho {{count}} mô hình",
+    "(default)": "(mặc định)",
+    "Importing...": "Đang nhập...",
+    "Exporting...": "Đang xuất...",
+    "Confirm pricing import": "Xác nhận nhập giá",
+    "{{count}} models will be updated. Blank values use the system default.": "Sẽ cập nhật {{count}} mô hình. Giá trị trống dùng mặc định của hệ thống.",
+    "Import": "Nhập",
+    "Fix these rows and import again.": "Hãy sửa các dòng này rồi nhập lại."
   }
 }

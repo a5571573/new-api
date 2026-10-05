@@ -6866,8 +6866,16 @@
     "Zoom": "Zoom",
     "Import Excel": "Import Excel",
     "Export Excel": "Export Excel",
-    "Batch import successful!": "Batch import successful!",
     "Import failed": "Import failed",
-    "Upload failed": "Upload failed"
+    "Failed to export model pricing": "Failed to export model pricing",
+    "No pricing changes found in the file": "No pricing changes found in the file",
+    "Updated pricing for {{count}} models": "Updated pricing for {{count}} models",
+    "(default)": "(default)",
+    "Importing...": "Importing...",
+    "Exporting...": "Exporting...",
+    "Confirm pricing import": "Confirm pricing import",
+    "{{count}} models will be updated. Blank values use the system default.": "{{count}} models will be updated. Blank values use the system default.",
+    "Import": "Import",
+    "Fix these rows and import again.": "Fix these rows and import again."
   }
 }

@@ -6866,8 +6866,16 @@
     "Zoom": "缩放",
     "Import Excel": "导入 Excel",
     "Export Excel": "导出 Excel",
-    "Batch import successful!": "批量导入成功！",
     "Import failed": "导入失败",
-    "Upload failed": "上传失败"
+    "Failed to export model pricing": "导出模型定价失败",
+    "No pricing changes found in the file": "文件中没有任何定价变更",
+    "Updated pricing for {{count}} models": "已更新 {{count}} 个模型的定价",
+    "(default)": "（默认）",
+    "Importing...": "导入中...",
+    "Exporting...": "导出中...",
+    "Confirm pricing import": "确认导入定价",
+    "{{count}} models will be updated. Blank values use the system default.": "将更新 {{count}} 个模型。空白值表示沿用系统默认。",
+    "Import": "导入",
+    "Fix these rows and import again.": "请修正以下各行后重新导入。"
   }
 }
