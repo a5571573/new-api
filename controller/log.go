@@ -1,14 +1,42 @@
 package controller
 
 import (
+	"cmp"
+	"fmt"
 	"net/http"
+	"slices"
 	"strconv"
+	"strings"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/xuri/excelize/v2"
 
 	"github.com/gin-gonic/gin"
 )
+
+// 將 log.Type 整數轉為中文類型名稱
+func getLogTypeName(logType int) string {
+	switch logType {
+	case 1:
+		return "儲值" // LogTypeTopup
+	case 2:
+		return "消耗" // LogTypeConsume
+	case 3:
+		return "管理" // LogTypeManage
+	case 4:
+		return "系統" // LogTypeSystem
+	case 5:
+		return "錯誤" // LogTypeError
+	case 6:
+		return "退款" // LogTypeRefund
+	case 7:
+		return "登入" // LogTypeLogin
+	default:
+		return "未知" // LogTypeUnknown (0) 或其他未知類型
+	}
+}
 
 func GetAllLogs(c *gin.Context) {
 	pageInfo := common.GetPageQuery(c)
@@ -153,4 +181,162 @@ func GetLogsSelfStat(c *gin.Context) {
 		},
 	})
 	return
+}
+
+func ExportLogs(c *gin.Context) {
+	// 1. 解析前端傳入的篩選參數
+	logType, _ := strconv.Atoi(c.Query("type"))
+	startTimestamp, _ := strconv.ParseInt(c.Query("start_timestamp"), 10, 64)
+	endTimestamp, _ := strconv.ParseInt(c.Query("end_timestamp"), 10, 64)
+	modelName := c.Query("model_name")
+	group := c.Query("group")
+	username := c.Query("username")
+	tokenName := c.Query("token_name")
+
+	// 2. 建立 Excel 檔案
+	f := excelize.NewFile()
+	defer f.Close()
+
+	// ---------------------------------------------------------
+	// Sheet 1: Usage Logs (標準 10 大英文表頭)
+	// ---------------------------------------------------------
+	sheet1 := "Usage Logs"
+	f.SetSheetName("Sheet1", sheet1)
+
+	// 表頭完全對齊前端列表：Time, Channel, User, Token, Model, Stream, Tokens, Cost, Timing, Details
+	headers1 := []string{
+		"Time",
+		"Channel",
+		"User",
+		"Token",
+		"Model",
+		"Stream",
+		"Tokens",
+		"Cost",
+		"Timing",
+		"Details",
+	}
+	for i, h := range headers1 {
+		cell, _ := excelize.CoordinatesToCellName(i+1, 1)
+		_ = f.SetCellValue(sheet1, cell, h)
+	}
+
+	// 查詢日誌明細數據 (沿用 GetAllLogs，跨 SQLite/MySQL/PostgreSQL/ClickHouse)
+	logs, _, err := model.GetAllLogs(logType, startTimestamp, endTimestamp, modelName, username, tokenName, 0, 5000, 0, group, "", "")
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	for idx, l := range logs {
+		row := idx + 2
+
+		// 是否為流式請求 (Stream)
+		isStream := "No"
+		if l.IsStream { // 若 Log struct 無此欄位可直接設為 "No" 或判斷 l.Type
+			isStream = "Yes"
+		}
+
+		// 總 Tokens 數 (Prompt + Completion)
+		totalTokens := l.PromptTokens + l.CompletionTokens
+
+		// 耗時 (ms)
+		timingStr := fmt.Sprintf("%dms", l.UseTime)
+
+		// 詳情 (若 Content 為空，寫入日誌類型名稱)
+		details := l.Content
+		if details == "" {
+			details = getLogTypeName(l.Type)
+		}
+
+		_ = f.SetCellValue(sheet1, fmt.Sprintf("A%d", row), time.Unix(l.CreatedAt, 0).Format("2006-01-02 15:04:05")) // Time
+		_ = f.SetCellValue(sheet1, fmt.Sprintf("B%d", row), l.ChannelId)                                             // Channel
+		_ = f.SetCellValue(sheet1, fmt.Sprintf("C%d", row), l.Username)                                              // User
+		_ = f.SetCellValue(sheet1, fmt.Sprintf("D%d", row), l.TokenName)                                             // Token
+		_ = f.SetCellValue(sheet1, fmt.Sprintf("E%d", row), l.ModelName)                                             // Model
+		_ = f.SetCellValue(sheet1, fmt.Sprintf("F%d", row), isStream)                                                // Stream
+		_ = f.SetCellValue(sheet1, fmt.Sprintf("G%d", row), totalTokens)                                             // Tokens
+		_ = f.SetCellValue(sheet1, fmt.Sprintf("H%d", row), float64(l.Quota)/common.QuotaPerUnit)                    // Cost ($)
+		_ = f.SetCellValue(sheet1, fmt.Sprintf("I%d", row), timingStr)                                               // Timing
+		_ = f.SetCellValue(sheet1, fmt.Sprintf("J%d", row), details)                                                 // Details
+	}
+
+	// ---------------------------------------------------------
+	// Sheet 2: User Monthly Summary (用戶月度對帳全英文頁籤)
+	// ---------------------------------------------------------
+	sheet2 := "User Monthly Summary"
+	f.NewSheet(sheet2)
+
+	headers2 := []string{
+		"User",
+		"Month",
+		"Current Month Cost ($)",
+		"Previous Month Cost ($)",
+		"MoM Growth Rate",
+	}
+	for i, h := range headers2 {
+		cell, _ := excelize.CoordinatesToCellName(i+1, 1)
+		_ = f.SetCellValue(sheet2, cell, h)
+	}
+
+	// 月份分組在 Go 端計算，避免使用 SQLite 專用的 strftime，確保三種資料庫皆可用；
+	// 只統計消耗類型日誌，避免把儲值額度算成花費。
+	type monthlyKey struct {
+		Username string
+		Month    string
+	}
+	monthlyQuota := map[monthlyKey]int64{}
+	rows, err := model.LOG_DB.Model(&model.Log{}).
+		Select("logs.username, logs.created_at, logs.quota").
+		Where("logs.type = ?", model.LogTypeConsume).
+		Rows()
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	for rows.Next() {
+		var logUser string
+		var createdAt int64
+		var quota int64
+		if err := rows.Scan(&logUser, &createdAt, &quota); err != nil {
+			rows.Close()
+			common.ApiError(c, err)
+			return
+		}
+		monthlyQuota[monthlyKey{logUser, time.Unix(createdAt, 0).Format("2006-01")}] += quota
+	}
+	rows.Close()
+
+	reconList := make([]monthlyKey, 0, len(monthlyQuota))
+	for key := range monthlyQuota {
+		reconList = append(reconList, key)
+	}
+	slices.SortFunc(reconList, func(a, b monthlyKey) int {
+		if a.Month != b.Month {
+			return strings.Compare(b.Month, a.Month)
+		}
+		return cmp.Compare(monthlyQuota[b], monthlyQuota[a])
+	})
+
+	for idx, r := range reconList {
+		row := idx + 2
+		monthStart, _ := time.ParseInLocation("2006-01", r.Month, time.Local)
+		previous := monthlyKey{r.Username, monthStart.AddDate(0, -1, 0).Format("2006-01")}
+		_ = f.SetCellValue(sheet2, fmt.Sprintf("A%d", row), r.Username)
+		_ = f.SetCellValue(sheet2, fmt.Sprintf("B%d", row), r.Month)
+		_ = f.SetCellValue(sheet2, fmt.Sprintf("C%d", row), float64(monthlyQuota[r])/common.QuotaPerUnit)
+		_ = f.SetCellValue(sheet2, fmt.Sprintf("D%d", row), float64(monthlyQuota[previous])/common.QuotaPerUnit)
+		_ = f.SetCellFormula(sheet2, fmt.Sprintf("E%d", row), fmt.Sprintf("IF(D%d=0, 0, (C%d-D%d)/D%d)", row, row, row, row))
+	}
+
+	// 3. 設定 HTTP Response Header 並輸出帶時間戳記的 Excel 檔案
+	timestamp := time.Now().Format("20060102_1504")
+	filename := fmt.Sprintf("usage_logs_%s.xlsx", timestamp)
+
+	c.Header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+	c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=%s", filename))
+	c.Header("Pragma", "no-cache")
+	c.Header("Cache-Control", "no-cache")
+
+	_ = f.Write(c.Writer)
 }

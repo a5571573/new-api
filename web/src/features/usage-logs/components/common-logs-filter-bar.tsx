@@ -19,7 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 import { useQueryClient, useIsFetching, useQuery } from '@tanstack/react-query'
 import { useNavigate, getRouteApi } from '@tanstack/react-router'
 import type { Table } from '@tanstack/react-table'
-import { Eye, EyeOff } from 'lucide-react'
+import { Download, Eye, EyeOff } from 'lucide-react'
 import { useState, useCallback, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 
@@ -297,25 +297,57 @@ export function CommonLogsFilterBar<TData>(
   )
 
   const statsBar = <CommonLogsStats />
+  const handleExportExcel = () => {
+    const params = new URLSearchParams({
+      type: logType,
+      start_timestamp: String(
+        filters.startTime ? Math.floor(filters.startTime.getTime() / 1000) : 0
+      ),
+      end_timestamp: String(
+        filters.endTime ? Math.floor(filters.endTime.getTime() / 1000) : 0
+      ),
+      model_name: filters.model || '',
+      group: filters.group || '',
+      token_name: filters.token || '',
+      username: filters.username || '',
+    })
+    // Let the browser download the file directly from the backend.
+    window.location.href = `/api/log/export?${params.toString()}`
+  }
+
   const sensitiveToggle = (
-    <Tooltip>
-      <TooltipTrigger
-        render={
-          <Button
-            variant='ghost'
-            size='icon'
-            onClick={() => setSensitiveVisible(!sensitiveVisible)}
-            aria-label={sensitiveVisible ? t('Hide') : t('Show')}
-            className='text-muted-foreground hover:text-foreground size-7 max-sm:size-11'
-          />
-        }
-      >
-        {sensitiveVisible ? <Eye /> : <EyeOff />}
-      </TooltipTrigger>
-      <TooltipContent>
-        {sensitiveVisible ? t('Hide') : t('Show')}
-      </TooltipContent>
-    </Tooltip>
+    <div className='flex items-center gap-1.5'>
+      {isAdmin && (
+        <Button
+          variant='outline'
+          size='sm'
+          type='button'
+          onClick={handleExportExcel}
+          className='h-8 gap-1 text-xs'
+        >
+          <Download className='size-3.5' />
+          <span>{t('Export Excel')}</span>
+        </Button>
+      )}
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <Button
+              variant='ghost'
+              size='icon'
+              onClick={() => setSensitiveVisible(!sensitiveVisible)}
+              aria-label={sensitiveVisible ? t('Hide') : t('Show')}
+              className='text-muted-foreground hover:text-foreground size-7 max-sm:size-11'
+            />
+          }
+        >
+          {sensitiveVisible ? <Eye /> : <EyeOff />}
+        </TooltipTrigger>
+        <TooltipContent>
+          {sensitiveVisible ? t('Hide') : t('Show')}
+        </TooltipContent>
+      </Tooltip>
+    </div>
   )
 
   const dateRangeFilter = (
