@@ -112,33 +112,38 @@ func TestModelPricingExcelDatabaseMatrix(t *testing.T) {
 				assert.Positive(t, response.Data.Unchanged)
 			})
 
-			t.Run("blank cells unset values and zero stays an explicit price", func(t *testing.T) {
+			t.Run("prices match the settings page and blank cells clear them", func(t *testing.T) {
 				workbook := exportPricingWorkbook(t)
 				ratioRow := findPricingRow(t, workbook, "excel-ratio")
-				require.NoError(t, workbook.SetCellValue(pricingSheetEditable, fmt.Sprintf("E%d", ratioRow), 3))
+				input, err := workbook.GetCellValue(pricingSheetEditable, fmt.Sprintf("E%d", ratioRow))
+				require.NoError(t, err)
+				completion, err := workbook.GetCellValue(pricingSheetEditable, fmt.Sprintf("F%d", ratioRow))
+				require.NoError(t, err)
+				assert.Equal(t, []string{"3", "6"}, []string{input, completion}, "ratio 1.5 shows as $3 input and completion ratio 2 as $6 output")
+
+				require.NoError(t, workbook.SetCellValue(pricingSheetEditable, fmt.Sprintf("E%d", ratioRow), 6))
 				require.NoError(t, workbook.SetCellValue(pricingSheetEditable, fmt.Sprintf("F%d", ratioRow), ""))
 				rows, err := workbook.GetRows(pricingSheetEditable)
 				require.NoError(t, err)
-				newRow := len(rows) + 1
-				require.NoError(t, workbook.SetSheetRow(pricingSheetEditable, fmt.Sprintf("A%d", newRow), &[]any{"excel-new", nil, nil, 0}))
+				require.NoError(t, workbook.SetSheetRow(pricingSheetEditable, fmt.Sprintf("A%d", len(rows)+1), &[]any{"excel-new", nil, nil, 0}))
 
 				preview := importPricingWorkbook(t, workbook, true)
 				require.True(t, preview.Success, preview.Message)
 				assert.False(t, preview.Data.Applied)
 				assert.Equal(t, []pricingModelChange{
 					{ModelName: "excel-ratio", Fields: []pricingFieldChange{
-						{Field: "Model Ratio", Before: "1.5", After: "3"},
-						{Field: "Completion Ratio", Before: "2", After: ""},
+						{Field: pricingHeaders[colInput][0], Before: "3", After: "6"},
+						{Field: pricingHeaders[colCompletion][0], Before: "6", After: ""},
 					}},
-					{ModelName: "excel-new", Fields: []pricingFieldChange{{Field: "Fixed Price (USD/request)", Before: "", After: "0"}}},
+					{ModelName: "excel-new", Fields: []pricingFieldChange{{Field: pricingHeaders[colFixedPrice][0], Before: "", After: "0"}}},
 				}, preview.Data.Changes)
 				assert.Equal(t, model.PricingValues{"ModelRatio": 1.5, "CompletionRatio": float64(2)}, configuredPricing(t, "excel-ratio"), "dry run must not save")
 
 				applied := importPricingWorkbook(t, workbook, false)
 				require.True(t, applied.Success, applied.Message)
 				assert.True(t, applied.Data.Applied)
-				assert.Equal(t, model.PricingValues{"ModelRatio": float64(3)}, configuredPricing(t, "excel-ratio"))
-				assert.Equal(t, model.PricingValues{"ModelPrice": float64(0)}, configuredPricing(t, "excel-new"))
+				assert.Equal(t, model.PricingValues{"billing_setting.billing_mode": "ratio", "ModelRatio": float64(3)}, configuredPricing(t, "excel-ratio"))
+				assert.Equal(t, model.PricingValues{"billing_setting.billing_mode": "ratio", "ModelPrice": float64(0)}, configuredPricing(t, "excel-new"), "a blank mode with a fixed price is per request")
 			})
 
 			t.Run("any invalid row rejects the whole import", func(t *testing.T) {
@@ -146,12 +151,17 @@ func TestModelPricingExcelDatabaseMatrix(t *testing.T) {
 				fixedRow := findPricingRow(t, workbook, "excel-fixed")
 				ratioRow := findPricingRow(t, workbook, "excel-ratio")
 				require.NoError(t, workbook.SetCellValue(pricingSheetEditable, fmt.Sprintf("D%d", fixedRow), 0.08))
-				require.NoError(t, workbook.SetCellValue(pricingSheetEditable, fmt.Sprintf("B%d", ratioRow), "expr"))
+				require.NoError(t, workbook.SetCellValue(pricingSheetEditable, fmt.Sprintf("B%d", ratioRow), "abc"))
+				rows, err := workbook.GetRows(pricingSheetEditable)
+				require.NoError(t, err)
+				require.NoError(t, workbook.SetSheetRow(pricingSheetEditable, fmt.Sprintf("A%d", len(rows)+1), &[]any{"excel-lane", nil, nil, nil, nil, 5}))
 
 				response := importPricingWorkbook(t, workbook, false)
 				assert.False(t, response.Success)
-				require.Len(t, response.Data.Errors, 1)
+				require.Len(t, response.Data.Errors, 2)
 				assert.Contains(t, response.Data.Errors[0], "excel-ratio")
+				assert.Contains(t, response.Data.Errors[1], "excel-lane")
+				assert.Contains(t, response.Data.Errors[1], "requires", "a completion price needs an input price, as on the settings page")
 				assert.Equal(t, model.PricingValues{"ModelPrice": 0.04}, configuredPricing(t, "excel-fixed"))
 			})
 
