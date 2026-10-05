@@ -146,6 +146,37 @@ func TestModelPricingExcelDatabaseMatrix(t *testing.T) {
 				assert.Equal(t, model.PricingValues{"billing_setting.billing_mode": "ratio", "ModelPrice": float64(0)}, configuredPricing(t, "excel-new"), "a blank mode with a fixed price is per request")
 			})
 
+			t.Run("expression rows edit the prices inside a simple expression", func(t *testing.T) {
+				before, err := model.GetModelPricingSnapshot([]string{"excel-expr", "excel-tiered"})
+				require.NoError(t, err)
+				require.NoError(t, model.UpdateModelPricing([]model.ModelPricingChange{
+					{ModelName: "excel-expr", ExpectedVersion: before.EmptyVersion, Pricing: model.PricingValues{"billing_setting.billing_mode": "tiered_expr", "billing_setting.billing_expr": `tier("base", p * 2 + c * 8)`, "ModelRatio": float64(1)}},
+					{ModelName: "excel-tiered", ExpectedVersion: before.EmptyVersion, Pricing: model.PricingValues{"billing_setting.billing_mode": "tiered_expr", "billing_setting.billing_expr": `len <= 1000 ? tier("short", p * 1 + c * 2) : tier("long", p * 2 + c * 4)`}},
+				}))
+				workbook := exportPricingWorkbook(t)
+				exprRow := findPricingRow(t, workbook, "excel-expr")
+				input, err := workbook.GetCellValue(pricingSheetEditable, fmt.Sprintf("E%d", exprRow))
+				require.NoError(t, err)
+				assert.Equal(t, "2", input, "the price shown is the one billed by the expression, not the legacy ratio")
+				require.NoError(t, workbook.SetCellValue(pricingSheetEditable, fmt.Sprintf("E%d", exprRow), 3))
+				tieredRow := findPricingRow(t, workbook, "excel-tiered")
+				require.NoError(t, workbook.SetCellValue(pricingSheetEditable, fmt.Sprintf("E%d", tieredRow), 5))
+
+				rejected := importPricingWorkbook(t, workbook, false)
+				assert.False(t, rejected.Success)
+				require.Len(t, rejected.Data.Errors, 1)
+				assert.Contains(t, rejected.Data.Errors[0], "excel-tiered", "tiered expressions are edited as text")
+
+				require.NoError(t, workbook.SetCellValue(pricingSheetEditable, fmt.Sprintf("E%d", tieredRow), ""))
+				applied := importPricingWorkbook(t, workbook, false)
+				require.True(t, applied.Success, applied.Message)
+				assert.Equal(t, model.PricingValues{
+					"billing_setting.billing_mode": "tiered_expr",
+					"billing_setting.billing_expr": `tier("base", p * 3 + c * 8)`,
+					"ModelRatio":                   float64(1),
+				}, configuredPricing(t, "excel-expr"))
+			})
+
 			t.Run("any invalid row rejects the whole import", func(t *testing.T) {
 				workbook := exportPricingWorkbook(t)
 				fixedRow := findPricingRow(t, workbook, "excel-fixed")

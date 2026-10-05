@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -90,7 +91,9 @@ var pricingExcelGuide = []string{
 	"1. 只修改「Model Pricing」工作表，欄位與後台「模型定價」編輯畫面一致，價格單位都是美元。",
 	"   「Effective Pricing」是目前實際生效的價格（包含系統預設值），僅供參考，匯入時會忽略。",
 	"2. 定價模式：計費運算式、按Token、按次，與後台三個分頁相同。留空時會依填寫內容自動判斷。",
-	"   - 計費運算式：使用「計費運算式」欄計費。",
+	"   - 計費運算式：使用「計費運算式」欄計費。簡單的運算式（例如 tier(\"base\", p * 2 + c * 8)）會把價格顯示在價格欄，",
+	"     直接改價格欄即可，匯入時會自動改寫運算式；有分段或條件的運算式價格欄為空白，請直接改「計費運算式」欄。",
+	"     同一列不要同時修改價格欄和計費運算式欄。",
 	"   - 按Token：使用輸入價格與其他 token 價格計費（每百萬 token 的美元價格）。",
 	"   - 按次：使用「固定價格」，每次請求收費一次。",
 	"   留空時：有填計費運算式 → 計費運算式；否則有填固定價格 → 按次；否則 → 按Token。",
@@ -119,9 +122,60 @@ func pricingNumber(values model.PricingValues, key string) (float64, bool) {
 	return number, ok
 }
 
+// Simple single-tier expressions, such as tier("base", p * 2.5 + c * 10), are
+// what the visual editor shows as plain token prices. Only these are shown and
+// edited through the price columns; anything else is edited as expression text.
+var (
+	simpleTierExpr     = regexp.MustCompile(`^tier\(\s*"([A-Za-z0-9_\-]+)"\s*,\s*(.+?)\s*\)$`)
+	simpleTierExprTerm = regexp.MustCompile(`^\s*([a-z]+)\s*\*\s*([0-9]+(?:\.[0-9]+)?(?:[eE][-+]?[0-9]+)?)\s*$`)
+	exprVariableCols   = []struct {
+		variable string
+		col      pricingCol
+	}{
+		{"p", colInput}, {"c", colCompletion}, {"cr", colCacheRead}, {"cc", colCacheWrite},
+		{"img", colImage}, {"ai", colAudioInput}, {"ao", colAudioOutput},
+	}
+)
+
+// parseSimpleTierExpr returns the tier name and the USD/1M price per column,
+// or ok=false when the expression is not a single flat tier.
+func parseSimpleTierExpr(expression string) (string, map[pricingCol]float64, bool) {
+	match := simpleTierExpr.FindStringSubmatch(strings.TrimSpace(expression))
+	if match == nil {
+		return "", nil, false
+	}
+	prices := map[pricingCol]float64{}
+	for term := range strings.SplitSeq(match[2], "+") {
+		parts := simpleTierExprTerm.FindStringSubmatch(term)
+		if parts == nil {
+			return "", nil, false
+		}
+		col, known := pricingCol(0), false
+		for _, candidate := range exprVariableCols {
+			if candidate.variable == parts[1] {
+				col, known = candidate.col, true
+				break
+			}
+		}
+		if !known {
+			return "", nil, false
+		}
+		if _, duplicate := prices[col]; duplicate {
+			return "", nil, false
+		}
+		price, err := strconv.ParseFloat(parts[2], 64)
+		if err != nil {
+			return "", nil, false
+		}
+		prices[col] = price
+	}
+	return match[1], prices, true
+}
+
 // pricingRowCells renders one model the way the settings page shows it. The
-// mode follows the effective configuration (built-in expressions included),
-// while prices come from the configured values the page edits.
+// mode follows the effective configuration (built-in expressions included);
+// expression rows show the prices inside a simple expression, other rows show
+// the configured legacy prices converted to USD.
 func pricingRowCells(name string, configured, effective model.PricingValues) [pricingColCount]any {
 	var cells [pricingColCount]any
 	cells[colModel] = name
@@ -129,7 +183,14 @@ func pricingRowCells(name string, configured, effective model.PricingValues) [pr
 	switch {
 	case effective["billing_setting.billing_mode"] == "tiered_expr":
 		cells[colMode] = pricingModeExpression
-		cells[colExpression] = effective["billing_setting.billing_expr"]
+		expression, _ := effective["billing_setting.billing_expr"].(string)
+		cells[colExpression] = expression
+		if _, prices, ok := parseSimpleTierExpr(expression); ok {
+			for col, price := range prices {
+				cells[col] = price
+			}
+		}
+		return cells
 	case fixed:
 		cells[colMode] = pricingModePerRequest
 	default:
@@ -242,7 +303,7 @@ func ExportModelPricingExcel(c *gin.Context) {
 
 // pricingDraftFromCells converts an edited row into the draft the settings page
 // would save for the same inputs.
-func pricingDraftFromCells(cells [pricingColCount]string, previous model.PricingValues) (model.PricingValues, []string) {
+func pricingDraftFromCells(cells [pricingColCount]string, changed map[pricingCol]bool, previous model.PricingValues) (model.PricingValues, []string) {
 	var problems []string
 	header := func(col pricingCol) string { return pricingHeaders[col][0] }
 	numbers := map[pricingCol]float64{}
@@ -287,10 +348,7 @@ func pricingDraftFromCells(cells [pricingColCount]string, previous model.Pricing
 		draft["billing_setting.plugin_billing_expr"] = variants
 	}
 	if mode == pricingModeExpression {
-		draft["billing_setting.billing_mode"] = "tiered_expr"
-		if cells[colExpression] != "" {
-			draft["billing_setting.billing_expr"] = cells[colExpression]
-		}
+		return expressionPricingDraft(draft, cells, changed, numbers, previous)
 	}
 	if mode == pricingModePerRequest {
 		price, ok := numbers[colFixedPrice]
@@ -299,9 +357,6 @@ func pricingDraftFromCells(cells [pricingColCount]string, previous model.Pricing
 		}
 		draft["ModelPrice"] = price
 		return draft, nil
-	}
-	if price, ok := numbers[colFixedPrice]; ok && mode == pricingModeExpression {
-		draft["ModelPrice"] = price
 	}
 
 	// Token prices: the same checks the settings page runs before saving.
@@ -333,6 +388,56 @@ func pricingDraftFromCells(cells [pricingColCount]string, previous model.Pricing
 				draft[key] = old
 			}
 		}
+	}
+	return draft, nil
+}
+
+// expressionPricingDraft saves an expression row. The legacy per-token and
+// per-request prices are kept as they were (the page keeps them for switching
+// back), and edited price columns are written into a simple expression.
+func expressionPricingDraft(draft model.PricingValues, cells [pricingColCount]string, changed map[pricingCol]bool, numbers map[pricingCol]float64, previous model.PricingValues) (model.PricingValues, []string) {
+	draft["billing_setting.billing_mode"] = "tiered_expr"
+	for _, key := range []string{"ModelPrice", "ModelRatio", "CompletionRatio", "CacheRatio", "CreateCacheRatio", "ImageRatio", "AudioRatio", "AudioCompletionRatio"} {
+		if value, ok := previous[key]; ok {
+			draft[key] = value
+		}
+	}
+	if changed[colFixedPrice] {
+		return nil, []string{fmt.Sprintf("%s is not used by %s; set %s to %s instead", pricingHeaders[colFixedPrice][0], pricingModeExpression, pricingHeaders[colMode][0], pricingModePerRequest)}
+	}
+
+	pricesChanged := false
+	for col := colInput; col <= colAudioOutput; col++ {
+		pricesChanged = pricesChanged || changed[col]
+	}
+	expression := cells[colExpression]
+	if pricesChanged && changed[colExpression] {
+		return nil, []string{fmt.Sprintf("edit either %s or the price columns, not both", pricingHeaders[colExpression][0])}
+	}
+	if !changed[colExpression] && (pricesChanged || expression == "") {
+		tierName := "base"
+		if expression != "" {
+			name, _, ok := parseSimpleTierExpr(expression)
+			if !ok {
+				return nil, []string{fmt.Sprintf("this %s has tiers or conditions; edit %s directly", pricingModeExpression, pricingHeaders[colExpression][0])}
+			}
+			tierName = name
+		}
+		_, hasInput := numbers[colInput]
+		_, hasCompletion := numbers[colCompletion]
+		if !hasInput || !hasCompletion {
+			return nil, []string{fmt.Sprintf("%s needs both %s and %s", pricingModeExpression, pricingHeaders[colInput][0], pricingHeaders[colCompletion][0])}
+		}
+		var terms []string
+		for _, variable := range exprVariableCols {
+			if price, ok := numbers[variable.col]; ok {
+				terms = append(terms, variable.variable+" * "+strconv.FormatFloat(price, 'f', -1, 64))
+			}
+		}
+		expression = fmt.Sprintf("tier(%q, %s)", tierName, strings.Join(terms, " + "))
+	}
+	if expression != "" {
+		draft["billing_setting.billing_expr"] = expression
 	}
 	return draft, nil
 }
@@ -444,6 +549,7 @@ func ImportModelPricingExcel(c *gin.Context) {
 		currentCells := pricingRowCells(name, configured, effective)
 		var merged [pricingColCount]string
 		var fields []pricingFieldChange
+		changed := map[pricingCol]bool{}
 		for col := colModel; col < colVersion; col++ {
 			before := pricingCellText(currentCells[col])
 			merged[col] = before
@@ -457,6 +563,7 @@ func ImportModelPricingExcel(c *gin.Context) {
 				continue
 			}
 			merged[col] = after
+			changed[col] = true
 			fields = append(fields, pricingFieldChange{Field: pricingHeaders[col][0], Before: before, After: after})
 		}
 		if len(fields) == 0 {
@@ -467,7 +574,7 @@ func ImportModelPricingExcel(c *gin.Context) {
 			rowErrors = append(rowErrors, fmt.Sprintf("row %d (%s): changed by someone else after export; export again", row.line, name))
 			continue
 		}
-		draft, problems := pricingDraftFromCells(merged, configured)
+		draft, problems := pricingDraftFromCells(merged, changed, configured)
 		if len(problems) == 0 {
 			if err := model.ValidateModelPricing(name, draft); err != nil {
 				problems = append(problems, err.Error())
