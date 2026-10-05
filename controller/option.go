@@ -509,7 +509,42 @@ func UpdateOption(c *gin.Context) {
 	})
 }
 
-// ExportModelRatios 匯出完整模型計費配置成 Excel 檔案
+type RequestRule struct {
+	FieldType string  `json:"field_type"` // request_body 或 header
+	ParamKey  string  `json:"param_key"`  // 例如 service_tier
+	Operator  string  `json:"operator"`   // ==, !=, >= 等
+	Value     string  `json:"value"`      // 匹配值
+	Ratio     float64 `json:"ratio"`      // 命中時的倍率
+}
+
+type BillingBranch struct {
+	Name            string  `json:"name"`
+	InputPrice      float64 `json:"input_price"`
+	OutputPrice     float64 `json:"output_price"`
+	CacheReadPrice  float64 `json:"cache_read_price"`
+	CacheWritePrice float64 `json:"cache_write_price"`
+}
+
+type BillingTier struct {
+	Name      string          `json:"name"`
+	Condition string          `json:"condition"` // CEL 條件字串
+	Branches  []BillingBranch `json:"branches"`
+}
+
+type ModelCELConfig struct {
+	Tiers []BillingTier `json:"tiers"`
+	Rules []RequestRule `json:"rules"`
+}
+
+// safeGetCol 安全取得陣列欄位 (避免列超出索引報錯)
+func safeGetCol(row []string, idx int) string {
+	if idx < len(row) {
+		return row[idx]
+	}
+	return "0"
+}
+
+// ExportModelRatios 匯出完整模型計費配置成 Excel 檔案 (支援多 Sheet)
 func ExportModelRatios(c *gin.Context) {
 	f := excelize.NewFile()
 	defer func() {
@@ -518,27 +553,49 @@ func ExportModelRatios(c *gin.Context) {
 		}
 	}()
 
-	sheetName := "Sheet1"
-	headers := []string{
-		"Model Name", "Billing Mode", "Billing Expr",
-		"Fixed Price ($)", "Model Ratio", "Completion Ratio",
-	}
+	sBase := "Model_Base"
+	sTiers := "Model_Tiers"
+	sRules := "Request_Rules"
 
-	for i, h := range headers {
+	f.NewSheet(sBase)
+	f.NewSheet(sTiers)
+	f.NewSheet(sRules)
+	f.DeleteSheet("Sheet1") // 刪除預設工作表
+
+	// 1. 表頭設定
+	baseHeaders := []string{`Model Name`, `Billing Mode`, `Billing Expr`, `Fixed Price ($)`, `Model Ratio`, `Completion Ratio`}
+	tierHeaders := []string{
+		"Model Name",
+		"Tier Name",
+		"Condition (CEL)",
+		"Branch Name",
+		"Input Price ($/1M)",
+		"Output Price ($/1M)",
+		"Cache Read ($/1M)",
+		"Cache Write ($/1M)",
+	}
+	ruleHeaders := []string{`Model Name`, `Field Type`, `Parameter Key`, `Operator`, `Match Value`, `Ratio Multiplier`}
+
+	for i, h := range baseHeaders {
 		cell, _ := excelize.CoordinatesToCellName(i+1, 1)
-		f.SetCellValue(sheetName, cell, h)
+		f.SetCellValue(sBase, cell, h)
+	}
+	for i, h := range tierHeaders {
+		cell, _ := excelize.CoordinatesToCellName(i+1, 1)
+		f.SetCellValue(sTiers, cell, h)
+	}
+	for i, h := range ruleHeaders {
+		cell, _ := excelize.CoordinatesToCellName(i+1, 1)
+		f.SetCellValue(sRules, cell, h)
 	}
 
-	// 1. 從 billing_setting 抓取表達式 Map (對齊官方 Copy 介面)
+	// 2. 獲取資料庫最新狀態
 	billingModeMap := billing_setting.GetBillingModeCopy()
 	billingExprMap := billing_setting.GetBillingExprCopy()
-
-	// 2. 從 model_setting 抓取傳統倍率 Map (對齊官方 Copy 介面)
 	modelPriceMap := ratio_setting.GetModelPriceCopy()
 	modelRatioMap := ratio_setting.GetModelRatioCopy()
 	completionRatioMap := ratio_setting.GetCompletionRatioCopy()
 
-	// 彙整所有模型名稱列表
 	modelSet := make(map[string]bool)
 	for k := range billingExprMap {
 		modelSet[k] = true
@@ -556,19 +613,54 @@ func ExportModelRatios(c *gin.Context) {
 	}
 	sort.Strings(modelList)
 
-	for rowIdx, modelName := range modelList {
-		row := rowIdx + 2
-		f.SetCellValue(sheetName, fmt.Sprintf("A%d", row), modelName)
+	rBase, rTiers, rRules := 2, 2, 2
 
+	for _, modelName := range modelList {
 		mode := billingModeMap[modelName]
 		if mode == "" {
 			mode = "expr"
 		}
-		f.SetCellValue(sheetName, fmt.Sprintf("B%d", row), mode)
-		f.SetCellValue(sheetName, fmt.Sprintf("C%d", row), billingExprMap[modelName])
-		f.SetCellValue(sheetName, fmt.Sprintf("D%d", row), modelPriceMap[modelName])
-		f.SetCellValue(sheetName, fmt.Sprintf("E%d", row), modelRatioMap[modelName])
-		f.SetCellValue(sheetName, fmt.Sprintf("F%d", row), completionRatioMap[modelName])
+		exprStr := billingExprMap[modelName]
+
+		// 寫入 Sheet 1: Model_Base
+		f.SetCellValue(sBase, fmt.Sprintf("A%d", rBase), modelName)
+		f.SetCellValue(sBase, fmt.Sprintf("B%d", rBase), mode)
+		f.SetCellValue(sBase, fmt.Sprintf("C%d", rBase), exprStr)
+		f.SetCellValue(sBase, fmt.Sprintf("D%d", rBase), modelPriceMap[modelName])
+		f.SetCellValue(sBase, fmt.Sprintf("E%d", rBase), modelRatioMap[modelName])
+		f.SetCellValue(sBase, fmt.Sprintf("F%d", rBase), completionRatioMap[modelName])
+		rBase++
+
+		// 嘗試解析 CEL 高級配置 (Tiers & Rules)
+		if strings.HasPrefix(strings.TrimSpace(exprStr), "{") {
+			var cfg ModelCELConfig
+			if err := json.Unmarshal([]byte(exprStr), &cfg); err == nil {
+				// 寫入 Sheet 2: Model_Tiers
+				for _, tier := range cfg.Tiers {
+					for _, b := range tier.Branches {
+						f.SetCellValue(sTiers, fmt.Sprintf("A%d", rTiers), modelName)
+						f.SetCellValue(sTiers, fmt.Sprintf("B%d", rTiers), tier.Name)
+						f.SetCellValue(sTiers, fmt.Sprintf("C%d", rTiers), tier.Condition)
+						f.SetCellValue(sTiers, fmt.Sprintf("D%d", rTiers), b.Name)
+						f.SetCellValue(sTiers, fmt.Sprintf("E%d", rTiers), b.InputPrice)
+						f.SetCellValue(sTiers, fmt.Sprintf("F%d", rTiers), b.OutputPrice)
+						f.SetCellValue(sTiers, fmt.Sprintf("G%d", rTiers), b.CacheReadPrice)
+						f.SetCellValue(sTiers, fmt.Sprintf("H%d", rTiers), b.CacheWritePrice)
+						rTiers++
+					}
+				}
+				// 寫入 Sheet 3: Request_Rules
+				for _, rule := range cfg.Rules {
+					f.SetCellValue(sRules, fmt.Sprintf("A%d", rRules), modelName)
+					f.SetCellValue(sRules, fmt.Sprintf("B%d", rRules), rule.FieldType)
+					f.SetCellValue(sRules, fmt.Sprintf("C%d", rRules), rule.ParamKey)
+					f.SetCellValue(sRules, fmt.Sprintf("D%d", rRules), rule.Operator)
+					f.SetCellValue(sRules, fmt.Sprintf("E%d", rRules), rule.Value)
+					f.SetCellValue(sRules, fmt.Sprintf("F%d", rRules), rule.Ratio)
+					rRules++
+				}
+			}
+		}
 	}
 
 	c.Header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
@@ -576,7 +668,7 @@ func ExportModelRatios(c *gin.Context) {
 	_ = f.Write(c.Writer)
 }
 
-// ImportModelRatios 批量匯入並更新模型計費
+// ImportModelRatios 批量匯入並更新模型計費 (支援多 Sheet 解析組合)
 func ImportModelRatios(c *gin.Context) {
 	file, _, err := c.Request.FormFile("file")
 	if err != nil {
@@ -592,68 +684,145 @@ func ImportModelRatios(c *gin.Context) {
 	}
 	defer f.Close()
 
-	rows, err := f.GetRows("Sheet1")
-	if err != nil || len(rows) <= 1 {
-		c.JSON(http.StatusOK, gin.H{"success": false, "message": "Excel 內容無效或為空"})
-		return
-	}
-
-	// 取得當前 Map 副本
 	billingModeMap := billing_setting.GetBillingModeCopy()
 	billingExprMap := billing_setting.GetBillingExprCopy()
 	modelPriceMap := ratio_setting.GetModelPriceCopy()
 	modelRatioMap := ratio_setting.GetModelRatioCopy()
 	completionRatioMap := ratio_setting.GetCompletionRatioCopy()
 
-	for i, row := range rows {
-		if i == 0 || len(row) == 0 {
-			continue
-		}
-		modelName := strings.TrimSpace(row[0])
-		if modelName == "" {
-			continue
-		}
+	// 臨時儲存 CEL 高級配置的 Map
+	celConfigs := make(map[string]*ModelCELConfig)
 
-		// Col B: Billing Mode
-		if len(row) > 1 && row[1] != "" {
-			billingModeMap[modelName] = strings.TrimSpace(row[1])
-		}
-		// Col C: Billing Expr
-		if len(row) > 2 && row[2] != "" {
-			billingExprMap[modelName] = strings.TrimSpace(row[2])
-		}
-		// Col D: Model Price
-		if len(row) > 3 && row[3] != "" {
-			if val, err := strconv.ParseFloat(strings.TrimSpace(row[3]), 64); err == nil {
-				if val > 0 {
-					modelPriceMap[modelName] = val
-				} else {
-					delete(modelPriceMap, modelName)
+	// 1. 解析 Sheet 1: Model_Base
+	if rows, err := f.GetRows("Model_Base"); err == nil {
+		for i, row := range rows {
+			if i == 0 || len(row) == 0 {
+				continue
+			}
+			mName := strings.TrimSpace(row[0])
+			if mName == "" {
+				continue
+			}
+
+			if len(row) > 1 && row[1] != "" {
+				billingModeMap[mName] = strings.TrimSpace(row[1])
+			}
+			if len(row) > 2 && row[2] != "" {
+				billingExprMap[mName] = strings.TrimSpace(row[2])
+			}
+			if len(row) > 3 && row[3] != "" {
+				if val, err := strconv.ParseFloat(strings.TrimSpace(row[3]), 64); err == nil {
+					if val > 0 {
+						modelPriceMap[mName] = val
+					} else {
+						delete(modelPriceMap, mName)
+					}
 				}
 			}
-		}
-		// Col E: Model Ratio
-		if len(row) > 4 && row[4] != "" {
-			if val, err := strconv.ParseFloat(strings.TrimSpace(row[4]), 64); err == nil {
-				modelRatioMap[modelName] = val
+			if len(row) > 4 && row[4] != "" {
+				if val, err := strconv.ParseFloat(strings.TrimSpace(row[4]), 64); err == nil {
+					modelRatioMap[mName] = val
+				}
 			}
-		}
-		// Col F: Completion Ratio
-		if len(row) > 5 && row[5] != "" {
-			if val, err := strconv.ParseFloat(strings.TrimSpace(row[5]), 64); err == nil {
-				completionRatioMap[modelName] = val
+			if len(row) > 5 && row[5] != "" {
+				if val, err := strconv.ParseFloat(strings.TrimSpace(row[5]), 64); err == nil {
+					completionRatioMap[mName] = val
+				}
 			}
 		}
 	}
 
-	// 寫回 Option 資料庫
+	// 2. 解析 Sheet 2: Model_Tiers
+	if rows, err := f.GetRows("Model_Tiers"); err == nil {
+		for i, row := range rows {
+			if i == 0 || len(row) < 4 {
+				continue
+			}
+			mName := strings.TrimSpace(row[0])
+			if mName == "" {
+				continue
+			}
+
+			if _, exists := celConfigs[mName]; !exists {
+				celConfigs[mName] = &ModelCELConfig{Tiers: []BillingTier{}, Rules: []RequestRule{}}
+			}
+
+			tName := strings.TrimSpace(row[1])
+			tCond := strings.TrimSpace(row[2])
+			bName := strings.TrimSpace(row[3])
+
+			inP, _ := strconv.ParseFloat(strings.TrimSpace(safeGetCol(row, 4)), 64)
+			outP, _ := strconv.ParseFloat(strings.TrimSpace(safeGetCol(row, 5)), 64)
+			cRead, _ := strconv.ParseFloat(strings.TrimSpace(safeGetCol(row, 6)), 64)
+			cWrite, _ := strconv.ParseFloat(strings.TrimSpace(safeGetCol(row, 7)), 64)
+
+			branch := BillingBranch{Name: bName, InputPrice: inP, OutputPrice: outP, CacheReadPrice: cRead, CacheWritePrice: cWrite}
+
+			// 尋找是否已存在該 Tier
+			foundTier := false
+			for tIdx, t := range celConfigs[mName].Tiers {
+				if t.Name == tName {
+					celConfigs[mName].Tiers[tIdx].Branches = append(celConfigs[mName].Tiers[tIdx].Branches, branch)
+					foundTier = true
+					break
+				}
+			}
+			if !foundTier {
+				celConfigs[mName].Tiers = append(celConfigs[mName].Tiers, BillingTier{
+					Name:      tName,
+					Condition: tCond,
+					Branches:  []BillingBranch{branch},
+				})
+			}
+		}
+	}
+
+	// 3. 解析 Sheet 3: Request_Rules
+	if rows, err := f.GetRows("Request_Rules"); err == nil {
+		for i, row := range rows {
+			if i == 0 || len(row) < 6 {
+				continue
+			}
+			mName := strings.TrimSpace(row[0])
+			if mName == "" {
+				continue
+			}
+
+			if _, exists := celConfigs[mName]; !exists {
+				celConfigs[mName] = &ModelCELConfig{Tiers: []BillingTier{}, Rules: []RequestRule{}}
+			}
+
+			ratio, _ := strconv.ParseFloat(strings.TrimSpace(safeGetCol(row, 5)), 64)
+			rule := RequestRule{
+				FieldType: strings.TrimSpace(row[1]),
+				ParamKey:  strings.TrimSpace(row[2]),
+				Operator:  strings.TrimSpace(row[3]),
+				Value:     strings.TrimSpace(row[4]),
+				Ratio:     ratio,
+			}
+			celConfigs[mName].Rules = append(celConfigs[mName].Rules, rule)
+		}
+	}
+
+	// 4. 將解析出的 CEL 結構體序列化回 JSON 並覆蓋原 Expr
+	for mName, cfg := range celConfigs {
+		if len(cfg.Tiers) > 0 || len(cfg.Rules) > 0 {
+			bytes, err := json.Marshal(cfg)
+			if err == nil {
+				billingExprMap[mName] = string(bytes)
+				billingModeMap[mName] = "expr"
+			}
+		}
+	}
+
+	// 5. 寫回 Option 資料庫
 	saveMapOption("billing_setting.billing_mode", billingModeMap)
 	saveMapOption("billing_setting.billing_expr", billingExprMap)
 	saveMapOption("ModelPrice", modelPriceMap)
 	saveMapOption("ModelRatio", modelRatioMap)
 	saveMapOption("CompletionRatio", completionRatioMap)
 
-	c.JSON(http.StatusOK, gin.H{"success": true, "message": "批量匯入成功！已同步更新表達式與倍率設定。"})
+	c.JSON(http.StatusOK, gin.H{"success": true, "message": "批量匯入成功！已同步更新多工作表基礎倍率與 CEL 階梯規則。"})
 }
 
 func saveMapOption(key string, data interface{}) {

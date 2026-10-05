@@ -50,6 +50,7 @@ import {
   ModelRatioVisualEditor,
   type ModelRatioVisualEditorHandle,
 } from "./model-ratio-visual-editor";
+import { api } from "@/lib/api";
 
 type ModelFormValues = {
   ModelPrice: string;
@@ -236,12 +237,36 @@ export const ModelRatioForm = memo(function ModelRatioForm({
     await form.handleSubmit(onSave)();
   }, [editMode, form, onSave]);
 
-  // 🟢 處理 Excel 匯出
-  const handleExportExcel = useCallback(() => {
-    window.open("/api/option/export_model_ratios", "_blank");
-  }, []);
+  // 🟢 處理 Excel 匯出 (使用專案統一的 api 模組，自動帶入完整身份驗證)
+  const handleExportExcel = useCallback(async () => {
+    try {
+      const response = await api.get("/api/option/export_model_ratios", {
+        responseType: "blob",
+        headers: {
+          Accept:
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        },
+      });
 
-  // 🟢 處理 Excel 匯入
+      const blob = new Blob([response.data], {
+        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      });
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `model_pricing_${Math.floor(Date.now() / 1000)}.xlsx`;
+      document.body.appendChild(a);
+      a.click();
+
+      a.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (err) {
+      const failMsg = `\({t("Export failed")}:\){(err as Error).message}`;
+      toast?.error?.(failMsg) || alert(failMsg);
+    }
+  }, [t]);
+
+  // 🟢 處理 Excel 匯入 (使用專案統一的 api 模組)
   const handleImportExcel = useCallback(
     async (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
@@ -251,11 +276,12 @@ export const ModelRatioForm = memo(function ModelRatioForm({
       formData.append("file", file);
 
       try {
-        const res = await fetch("/api/option/import_model_ratios", {
-          method: "POST",
-          body: formData,
+        const response = await api.post("/api/option/import_model_ratios", formData, {
+          headers: {
+            "Content-Type": "multipart/form-data",
+          },
         });
-        const data = await res.json();
+        const data = response.data;
 
         if (data.success) {
           const successMsg = data.message
@@ -270,7 +296,7 @@ export const ModelRatioForm = memo(function ModelRatioForm({
           toast?.error?.(errorMsg) || alert(errorMsg);
         }
       } catch (err) {
-        const failMsg = `${t("Upload failed")}: ${(err as Error).message}`;
+        const failMsg = `\({t("Upload failed")}:\){(err as Error).message}`;
         toast?.error?.(failMsg) || alert(failMsg);
       } finally {
         if (fileInputRef.current) {
@@ -278,7 +304,7 @@ export const ModelRatioForm = memo(function ModelRatioForm({
         }
       }
     },
-    [t] // 記得將 t 加入 useCallback 的依賴陣列中
+    [t]
   );
 
   return (
