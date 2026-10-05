@@ -41,7 +41,7 @@ import {
 } from '@/components/ui/tooltip'
 import { getGroups } from '@/features/users/api'
 import { useMediaQuery } from '@/hooks'
-import { getUserGroups } from '@/lib/api'
+import { api, getUserGroups } from '@/lib/api'
 import { requireServerSuccess } from '@/lib/server-error-message'
 
 import { LOG_TYPE_ALL_VALUE, LOG_TYPE_FILTERS } from '../constants'
@@ -297,7 +297,7 @@ export function CommonLogsFilterBar<TData>(
   )
 
   const statsBar = <CommonLogsStats />
-  const handleExportExcel = () => {
+  const handleExportExcel = async () => {
     const params = new URLSearchParams({
       type: logType,
       start_timestamp: String(
@@ -311,8 +311,25 @@ export function CommonLogsFilterBar<TData>(
       token_name: filters.token || '',
       username: filters.username || '',
     })
-    // Let the browser download the file directly from the backend.
-    window.location.href = `/api/log/export?${params.toString()}`
+    // Dashboard auth travels in the Authorization header, so download through
+    // the API client instead of navigating to the URL.
+    let response
+    try {
+      response = await api.get<Blob>(`/api/log/export?${params.toString()}`, {
+        responseType: 'blob',
+      })
+    } catch {
+      // The API client already reports request errors.
+      return
+    }
+    const url = URL.createObjectURL(response.data)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `usage_logs_${Date.now()}.xlsx`
+    document.body.append(link)
+    link.click()
+    link.remove()
+    URL.revokeObjectURL(url)
   }
 
   const sensitiveToggle = (
