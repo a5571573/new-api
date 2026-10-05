@@ -29,9 +29,9 @@ const (
 	pricingImportMaxRows  = 20000
 	pricingImportMaxError = 50
 
-	pricingModeExpression = "計費運算式"
-	pricingModePerToken   = "按Token"
-	pricingModePerRequest = "按次"
+	pricingModeExpression = "Expression"
+	pricingModePerToken   = "Per Token"
+	pricingModePerRequest = "Per Request"
 )
 
 type pricingCol int
@@ -53,20 +53,20 @@ const (
 )
 
 // pricingHeaders are matched case-insensitively on import; the first name is
-// written on export and the English alias keeps older templates readable.
+// written on export and the Chinese alias keeps earlier exports importable.
 var pricingHeaders = [pricingColCount][]string{
-	colModel:       {"模型名稱", "Model Name"},
-	colMode:        {"定價模式", "Pricing Mode"},
-	colExpression:  {"計費運算式", "Billing Expression"},
-	colFixedPrice:  {"固定價格 (USD/次)", "Fixed Price (USD/request)"},
-	colInput:       {"輸入價格 (USD/1M tokens)", "Input Price (USD/1M tokens)"},
-	colCompletion:  {"補全價格 (USD/1M tokens)", "Completion Price (USD/1M tokens)"},
-	colCacheRead:   {"緩存讀取價格 (USD/1M tokens)", "Cache Read Price (USD/1M tokens)"},
-	colCacheWrite:  {"緩存寫入價格 (USD/1M tokens)", "Cache Write Price (USD/1M tokens)"},
-	colImage:       {"圖像輸入價格 (USD/1M tokens)", "Image Input Price (USD/1M tokens)"},
-	colAudioInput:  {"音頻輸入價格 (USD/1M tokens)", "Audio Input Price (USD/1M tokens)"},
-	colAudioOutput: {"音頻輸出價格 (USD/1M tokens)", "Audio Output Price (USD/1M tokens)"},
-	colVersion:     {"版本 (請勿修改)", "Version (do not edit)"},
+	colModel:       {"Model Name", "模型名稱"},
+	colMode:        {"Pricing Mode", "定價模式"},
+	colExpression:  {"Billing Expression", "計費運算式"},
+	colFixedPrice:  {"Fixed Price (USD/request)", "固定價格 (USD/次)"},
+	colInput:       {"Input Price (USD/1M tokens)", "輸入價格 (USD/1M tokens)"},
+	colCompletion:  {"Completion Price (USD/1M tokens)", "補全價格 (USD/1M tokens)"},
+	colCacheRead:   {"Cache Read Price (USD/1M tokens)", "緩存讀取價格 (USD/1M tokens)"},
+	colCacheWrite:  {"Cache Write Price (USD/1M tokens)", "緩存寫入價格 (USD/1M tokens)"},
+	colImage:       {"Image Input Price (USD/1M tokens)", "圖像輸入價格 (USD/1M tokens)"},
+	colAudioInput:  {"Audio Input Price (USD/1M tokens)", "音頻輸入價格 (USD/1M tokens)"},
+	colAudioOutput: {"Audio Output Price (USD/1M tokens)", "音頻輸出價格 (USD/1M tokens)"},
+	colVersion:     {"Version (do not edit)", "版本 (請勿修改)"},
 }
 
 // Token prices other than input are stored as ratios of a base price, exactly
@@ -86,24 +86,25 @@ var pricingLanes = []struct {
 }
 
 var pricingExcelGuide = []string{
-	"模型定價批次編輯 / Model pricing bulk edit",
+	"Model pricing bulk edit",
 	"",
-	"1. 只修改「Model Pricing」工作表，欄位與後台「模型定價」編輯畫面一致，價格單位都是美元。",
-	"   「Effective Pricing」是目前實際生效的價格（包含系統預設值），僅供參考，匯入時會忽略。",
-	"2. 定價模式：計費運算式、按Token、按次，與後台三個分頁相同。留空時會依填寫內容自動判斷。",
-	"   - 計費運算式：使用「計費運算式」欄計費。簡單的運算式（例如 tier(\"base\", p * 2 + c * 8)）會把價格顯示在價格欄，",
-	"     直接改價格欄即可，匯入時會自動改寫運算式；有分段或條件的運算式價格欄為空白，請直接改「計費運算式」欄。",
-	"     同一列不要同時修改價格欄和計費運算式欄。",
-	"   - 按Token：使用輸入價格與其他 token 價格計費（每百萬 token 的美元價格）。",
-	"   - 按次：使用「固定價格」，每次請求收費一次。",
-	"   留空時：有填計費運算式 → 計費運算式；否則有填固定價格 → 按次；否則 → 按Token。",
-	"3. 空白 = 不設定（輸入價格以外的價格，空白代表沿用系統預設）；填 0 = 免費。",
-	"4. 按Token 模式下，填了其他價格就必須填輸入價格；輸入價格為 0 時其他價格只能是 0 或空白。",
-	"   音頻輸出價格需要先填音頻輸入價格。",
-	"5. 可新增列來設定新模型。刪除列不會刪除該模型的價格；沒有修改的列不會被寫入。",
-	"6. 不要修改「版本」欄。若匯出後有人在後台改過同一個模型，匯入會被拒絕，請重新匯出。",
-	"7. 匯入前會先列出所有變更供確認；任何一列有錯誤時，整批都不會寫入。",
-	"8. 任務插件的專屬計費表達式不在此檔案中，匯入時會保持不變。",
+	"1. Edit only the \"Model Pricing\" sheet. Its columns match the model pricing editor in the admin console; all prices are in USD.",
+	"   \"Effective Pricing\" shows the prices currently in effect (system defaults included). It is for reference and ignored on import.",
+	"2. Pricing Mode is Expression, Per Token, or Per Request, matching the three tabs in the editor.",
+	"   - Expression: billed by the Billing Expression. For a simple expression such as tier(\"base\", p * 2 + c * 8),",
+	"     its prices appear in the price columns; edit those and the expression is rewritten on import.",
+	"     Tiered or conditional expressions leave the price columns blank; edit the Billing Expression column instead.",
+	"     Do not change both the price columns and the Billing Expression in the same row.",
+	"   - Per Token: billed by the input price and the other token prices (USD per 1M tokens).",
+	"   - Per Request: billed by Fixed Price, once per request.",
+	"   If Pricing Mode is blank: a Billing Expression means Expression; otherwise a Fixed Price means Per Request; otherwise Per Token.",
+	"3. Blank = not set (prices other than the input price fall back to the system default). 0 = free.",
+	"4. In Per Token mode, any other token price requires an Input Price. When Input Price is 0, other prices must be 0 or blank.",
+	"   Audio Output Price requires an Audio Input Price.",
+	"5. Add rows to price new models. Deleting a row does not remove its price, and rows you did not change are not saved.",
+	"6. Do not edit the Version column. If someone changes the same model after your export, the import is rejected; export again.",
+	"7. All changes are listed for confirmation before saving. If any row has an error, nothing is saved.",
+	"8. Task plugin billing expressions are not included in this file and stay unchanged on import.",
 }
 
 type pricingFieldChange struct {
@@ -301,6 +302,22 @@ func ExportModelPricingExcel(c *gin.Context) {
 	}
 }
 
+// canonicalPricingMode accepts the English mode names (any case or spacing)
+// and the Chinese names used by earlier exports. Blank means "infer".
+func canonicalPricingMode(value string) (string, bool) {
+	switch strings.ToLower(strings.ReplaceAll(value, " ", "")) {
+	case "", "auto":
+		return "", true
+	case "expression", "tiered_expr", "計費運算式":
+		return pricingModeExpression, true
+	case "pertoken", "per-token", "ratio", "按token":
+		return pricingModePerToken, true
+	case "perrequest", "per-request", "按次":
+		return pricingModePerRequest, true
+	}
+	return value, false
+}
+
 // pricingDraftFromCells converts an edited row into the draft the settings page
 // would save for the same inputs.
 func pricingDraftFromCells(cells [pricingColCount]string, changed map[pricingCol]bool, previous model.PricingValues) (model.PricingValues, []string) {
@@ -319,25 +336,17 @@ func pricingDraftFromCells(cells [pricingColCount]string, changed map[pricingCol
 		numbers[col] = number
 	}
 
-	mode := cells[colMode]
-	switch strings.ToLower(strings.ReplaceAll(mode, " ", "")) {
-	case "", "auto":
-		switch {
-		case cells[colExpression] != "":
-			mode = pricingModeExpression
-		case cells[colFixedPrice] != "":
-			mode = pricingModePerRequest
-		default:
-			mode = pricingModePerToken
-		}
-	case strings.ToLower(pricingModeExpression), "expression", "tiered_expr":
+	mode, known := canonicalPricingMode(cells[colMode])
+	switch {
+	case !known:
+		problems = append(problems, fmt.Sprintf("%s must be %s, %s, %s, or blank (got %q)", header(colMode), pricingModeExpression, pricingModePerToken, pricingModePerRequest, cells[colMode]))
+	case mode != "":
+	case cells[colExpression] != "":
 		mode = pricingModeExpression
-	case strings.ToLower(pricingModePerToken), "pertoken", "per-token", "ratio":
-		mode = pricingModePerToken
-	case strings.ToLower(pricingModePerRequest), "perrequest", "per-request":
+	case cells[colFixedPrice] != "":
 		mode = pricingModePerRequest
 	default:
-		problems = append(problems, fmt.Sprintf("%s must be %s, %s, %s, or blank (got %q)", header(colMode), pricingModeExpression, pricingModePerToken, pricingModePerRequest, mode))
+		mode = pricingModePerToken
 	}
 	if len(problems) > 0 {
 		return nil, problems
@@ -506,6 +515,11 @@ func ImportModelPricingExcel(c *gin.Context) {
 				cells[col] = strings.TrimSpace(row[index])
 			} else {
 				cells[col] = ""
+			}
+		}
+		if raw, present := cells[colMode]; present {
+			if mode, known := canonicalPricingMode(raw); known {
+				cells[colMode] = mode
 			}
 		}
 		name := cells[colModel]

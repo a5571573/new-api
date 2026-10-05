@@ -112,6 +112,21 @@ func TestModelPricingExcelDatabaseMatrix(t *testing.T) {
 				assert.Positive(t, response.Data.Unchanged)
 			})
 
+			t.Run("earlier Chinese headers and mode names still import", func(t *testing.T) {
+				workbook := exportPricingWorkbook(t)
+				for col := range pricingColCount {
+					cell, err := excelize.CoordinatesToCellName(int(col)+1, 1)
+					require.NoError(t, err)
+					require.NoError(t, workbook.SetCellValue(pricingSheetEditable, cell, pricingHeaders[col][1]))
+				}
+				fixedRow := findPricingRow(t, workbook, "excel-fixed")
+				require.NoError(t, workbook.SetCellValue(pricingSheetEditable, fmt.Sprintf("B%d", fixedRow), "按次"))
+
+				response := importPricingWorkbook(t, workbook, true)
+				require.True(t, response.Success, response.Message)
+				assert.Empty(t, response.Data.Changes, "按次 is the same mode as Per Request")
+			})
+
 			t.Run("prices match the settings page and blank cells clear them", func(t *testing.T) {
 				workbook := exportPricingWorkbook(t)
 				ratioRow := findPricingRow(t, workbook, "excel-ratio")
