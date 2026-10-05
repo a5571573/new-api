@@ -30,11 +30,11 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
-function renderActions() {
+function renderActions(onImported = vi.fn(async () => undefined)) {
   const client = new QueryClient()
   const view = render(
     <QueryClientProvider client={client}>
-      <ModelPricingExcelActions />
+      <ModelPricingExcelActions onImported={onImported} />
     </QueryClientProvider>
   )
   const input = view.container.querySelector('input[type="file"]')
@@ -63,7 +63,8 @@ test('selecting a workbook with changes asks for confirmation before saving', as
     .mockResolvedValueOnce({
       data: { success: true, data: { applied: true, changes } },
     })
-  const input = renderActions()
+  const onImported = vi.fn(async () => undefined)
+  const input = renderActions(onImported)
 
   await user.upload(input, workbook)
 
@@ -72,11 +73,14 @@ test('selecting a workbook with changes asks for confirmation before saving', as
   expect(dialog).toHaveTextContent('Model Ratio: 1.25 → (default)')
   expect(post).toHaveBeenCalledTimes(1)
   expect(post.mock.calls[0][2]).toEqual({ params: { dry_run: 'true' } })
+  expect(onImported).not.toHaveBeenCalled()
 
   await user.click(screen.getByRole('button', { name: 'Import' }))
 
   await waitFor(() => expect(post).toHaveBeenCalledTimes(2))
   expect(post.mock.calls[1][2]).toEqual({ params: undefined })
+  // The settings page must reload its pricing baseline to show saved prices.
+  await waitFor(() => expect(onImported).toHaveBeenCalledTimes(1))
   await waitFor(() =>
     expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
   )

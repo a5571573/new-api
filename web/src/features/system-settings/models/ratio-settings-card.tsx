@@ -444,6 +444,13 @@ export function RatioSettingsCard({
     [updateOption]
   )
 
+  // The baseline is captured once, so writes made outside the form (the Excel
+  // import) must replace it for the editor to show the saved prices.
+  const reloadPricingBaseline = useCallback(async () => {
+    const refreshed = await pricingQuery.refetch()
+    if (refreshed.data) setPricingBaseline(refreshed.data)
+  }, [pricingQuery])
+
   const handleResetRatios = useCallback(() => {
     setConfirmOpen(true)
   }, [])
@@ -504,6 +511,7 @@ export function RatioSettingsCard({
             isSaving={updateOption.isPending || savePricing.isPending}
             isResetting={resetMutation.isPending}
             variant={tab === 'unset-models' ? 'unset' : 'default'}
+            onPricingImported={reloadPricingBaseline}
           />
         </>
       )

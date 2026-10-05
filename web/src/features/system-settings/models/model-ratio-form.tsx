@@ -74,6 +74,7 @@ type ModelRatioFormProps = {
   isSaving: boolean
   isResetting: boolean
   variant?: 'default' | 'unset'
+  onPricingImported: () => Promise<void>
 }
 
 type ModelJsonFieldName =
@@ -177,6 +178,7 @@ export const ModelRatioForm = memo(function ModelRatioForm({
   isSaving,
   isResetting,
   variant = 'default',
+  onPricingImported,
 }: ModelRatioFormProps) {
   const { t } = useTranslation()
   const isUnsetVariant = variant === 'unset'
@@ -268,7 +270,7 @@ export const ModelRatioForm = memo(function ModelRatioForm({
               />
             </SettingsPageActionsPortal>
 
-            <ModelPricingExcelActions />
+            <ModelPricingExcelActions onImported={onPricingImported} />
             <Button
               type='button'
               variant='destructive'

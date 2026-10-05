@@ -67,7 +67,12 @@ async function uploadPricingWorkbook(
   return res.data
 }
 
-export function ModelPricingExcelActions() {
+type ModelPricingExcelActionsProps = {
+  // Reloads the settings page's pricing baseline after an import is saved.
+  onImported: () => Promise<void>
+}
+
+export function ModelPricingExcelActions(props: ModelPricingExcelActionsProps) {
   const { t } = useTranslation()
   const queryClient = useQueryClient()
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -150,6 +155,7 @@ export function ModelPricingExcelActions() {
       toast.success(t('Updated pricing for {{count}} models', { count }))
       setReview(null)
       await invalidateModelPricing(queryClient)
+      await props.onImported()
     } catch (error) {
       handleServerError(error, t('Import failed'))
     } finally {

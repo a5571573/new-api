@@ -304,6 +304,7 @@ function PricingFormFixture(props: {
           variant={props.variant}
           onSave={props.onSave}
           onReset={() => undefined}
+          onPricingImported={async () => undefined}
           isSaving={false}
           isResetting={false}
         />
