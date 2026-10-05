@@ -6876,6 +6876,9 @@
     "Confirm pricing import": "Подтвердите импорт цен",
     "{{count}} models will be updated. Blank values use the system default.": "Будет обновлено моделей: {{count}}. Пустые значения используют системные значения по умолчанию.",
     "Import": "Импортировать",
-    "Fix these rows and import again.": "Исправьте эти строки и импортируйте снова."
+    "Fix these rows and import again.": "Исправьте эти строки и импортируйте снова.",
+    "Updated model prices": "Обновлены цены моделей",
+    "Imported model price list from Excel (updated {{count}} models)": "Импортирован прайс-лист из Excel (обновлено моделей: {{count}})",
+    "Exported model price list to Excel ({{count}} models)": "Прайс-лист экспортирован в Excel (моделей: {{count}})"
   }
 }

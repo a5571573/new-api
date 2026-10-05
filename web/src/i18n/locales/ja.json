@@ -6876,6 +6876,9 @@
     "Confirm pricing import": "価格のインポートを確認",
     "{{count}} models will be updated. Blank values use the system default.": "{{count}} 件のモデルが更新されます。空欄はシステムのデフォルトを使用します。",
     "Import": "インポート",
-    "Fix these rows and import again.": "以下の行を修正して再度インポートしてください。"
+    "Fix these rows and import again.": "以下の行を修正して再度インポートしてください。",
+    "Updated model prices": "モデル価格を更新",
+    "Imported model price list from Excel (updated {{count}} models)": "Excel から価格表をインポート（{{count}} 件のモデル価格を更新）",
+    "Exported model price list to Excel ({{count}} models)": "価格表を Excel にエクスポート（{{count}} 件のモデル）"
   }
 }

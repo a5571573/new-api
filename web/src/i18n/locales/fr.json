@@ -6876,6 +6876,9 @@
     "Confirm pricing import": "Confirmer l'importation des tarifs",
     "{{count}} models will be updated. Blank values use the system default.": "{{count}} modèles seront mis à jour. Les valeurs vides utilisent la valeur par défaut du système.",
     "Import": "Importer",
-    "Fix these rows and import again.": "Corrigez ces lignes et importez à nouveau."
+    "Fix these rows and import again.": "Corrigez ces lignes et importez à nouveau.",
+    "Updated model prices": "Tarifs des modèles mis à jour",
+    "Imported model price list from Excel (updated {{count}} models)": "Liste de prix importée depuis Excel ({{count}} modèles mis à jour)",
+    "Exported model price list to Excel ({{count}} models)": "Liste de prix exportée vers Excel ({{count}} modèles)"
   }
 }

@@ -6876,6 +6876,9 @@
     "Confirm pricing import": "Xác nhận nhập giá",
     "{{count}} models will be updated. Blank values use the system default.": "Sẽ cập nhật {{count}} mô hình. Giá trị trống dùng mặc định của hệ thống.",
     "Import": "Nhập",
-    "Fix these rows and import again.": "Hãy sửa các dòng này rồi nhập lại."
+    "Fix these rows and import again.": "Hãy sửa các dòng này rồi nhập lại.",
+    "Updated model prices": "Đã cập nhật giá mô hình",
+    "Imported model price list from Excel (updated {{count}} models)": "Đã nhập bảng giá từ Excel (cập nhật {{count}} mô hình)",
+    "Exported model price list to Excel ({{count}} models)": "Đã xuất bảng giá ra Excel ({{count}} mô hình)"
   }
 }

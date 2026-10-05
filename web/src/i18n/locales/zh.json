@@ -6876,6 +6876,9 @@
     "Confirm pricing import": "确认导入定价",
     "{{count}} models will be updated. Blank values use the system default.": "将更新 {{count}} 个模型。空白值表示沿用系统默认。",
     "Import": "导入",
-    "Fix these rows and import again.": "请修正以下各行后重新导入。"
+    "Fix these rows and import again.": "请修正以下各行后重新导入。",
+    "Updated model prices": "更新模型价格",
+    "Imported model price list from Excel (updated {{count}} models)": "导入价格表（Excel，更新 {{count}} 个模型价格）",
+    "Exported model price list to Excel ({{count}} models)": "导出价格表（Excel，共 {{count}} 个模型）"
   }
 }

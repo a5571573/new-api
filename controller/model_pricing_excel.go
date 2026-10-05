@@ -295,6 +295,7 @@ func ExportModelPricingExcel(c *gin.Context) {
 	}
 	_ = f.SetColWidth(pricingSheetGuide, "A", "A", 110)
 
+	recordManageAudit(c, "model.pricing.export", map[string]any{"count": len(snapshot.Entries)})
 	c.Header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 	c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=model_pricing_%s.xlsx", time.Now().Format("20060102_150405")))
 	if err := f.Write(c.Writer); err != nil {
@@ -629,7 +630,7 @@ func ImportModelPricingExcel(c *gin.Context) {
 		for _, change := range changes {
 			changedNames = append(changedNames, change.ModelName)
 		}
-		recordManageAudit(c, "model.pricing.update", map[string]any{"models": changedNames, "source": "excel"})
+		recordManageAudit(c, "model.pricing.import", map[string]any{"models": changedNames, "count": len(changedNames)})
 	}
 
 	common.ApiSuccess(c, gin.H{

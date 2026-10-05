@@ -6876,6 +6876,9 @@
     "Confirm pricing import": "Confirm pricing import",
     "{{count}} models will be updated. Blank values use the system default.": "{{count}} models will be updated. Blank values use the system default.",
     "Import": "Import",
-    "Fix these rows and import again.": "Fix these rows and import again."
+    "Fix these rows and import again.": "Fix these rows and import again.",
+    "Updated model prices": "Updated model prices",
+    "Imported model price list from Excel (updated {{count}} models)": "Imported model price list from Excel (updated {{count}} models)",
+    "Exported model price list to Excel ({{count}} models)": "Exported model price list to Excel ({{count}} models)"
   }
 }
